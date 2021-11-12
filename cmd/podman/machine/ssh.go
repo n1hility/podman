@@ -1,4 +1,5 @@
-// +build amd64,!windows arm64,!windows
+//go:build amd64 || arm64
+// +build amd64 arm64
 
 package machine
 
@@ -10,6 +11,7 @@ import (
 	"github.com/containers/podman/v3/cmd/podman/registry"
 	"github.com/containers/podman/v3/pkg/machine"
 	"github.com/containers/podman/v3/pkg/machine/qemu"
+	"github.com/containers/podman/v3/pkg/machine/wsl"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -52,22 +54,25 @@ func ssh(cmd *cobra.Command, args []string) error {
 
 	// Set the VM to default
 	vmName := defaultMachineName
+	vmType = getSystemDefaultVmType()
 
 	// If len is greater than 0, it means we may have been
 	// provided the VM name.  If so, we check.  The VM name,
 	// if provided, must be in args[0].
 	if len(args) > 0 {
 		switch vmType {
+		case "wsl":
+			validVM, err = wsl.IsValidVMName(args[0])
 		default:
 			validVM, err = qemu.IsValidVMName(args[0])
-			if err != nil {
-				return err
-			}
-			if validVM {
-				vmName = args[0]
-			} else {
-				sshOpts.Args = append(sshOpts.Args, args[0])
-			}
+		}
+		if err != nil {
+			return err
+		}
+		if validVM {
+			vmName = args[0]
+		} else {
+			sshOpts.Args = append(sshOpts.Args, args[0])
 		}
 	}
 
@@ -89,6 +94,8 @@ func ssh(cmd *cobra.Command, args []string) error {
 	}
 
 	switch vmType {
+	case "wsl":
+		vm, err = wsl.LoadVMByName(vmName)
 	default:
 		vm, err = qemu.LoadVMByName(vmName)
 	}

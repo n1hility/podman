@@ -63,6 +63,7 @@ require (
 	github.com/uber/jaeger-client-go v2.29.1+incompatible
 	github.com/vbauerster/mpb/v6 v6.0.4
 	github.com/vishvananda/netlink v1.1.1-0.20210330154013-f5de75959ad5
+	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8
 	go.etcd.io/bbolt v1.3.6
 	golang.org/x/crypto v0.0.0-20210711020723-a769d52b0f97
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c

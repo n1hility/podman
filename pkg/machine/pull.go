@@ -1,4 +1,5 @@
-// +build amd64,!windows arm64,!windows
+//go:build amd64 || arm64
+// +build amd64 arm64
 
 package machine
 
@@ -19,6 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/vbauerster/mpb/v6"
 	"github.com/vbauerster/mpb/v6/decor"
+	"github.com/xi2/xz"
 )
 
 // GenericDownload is used when a user provides a URL
@@ -79,18 +81,27 @@ func (g GenericDownload) getLocalUncompressedName() string {
 	return strings.TrimSuffix(uncompressedFilename, extension)
 }
 
-func (g GenericDownload) DownloadImage() error {
-	// If we have a URL for this "downloader", we now pull it
-	if g.URL != nil {
-		if err := DownloadVMImage(g.URL, g.LocalPath); err != nil {
-			return err
-		}
-	}
-	return Decompress(g.LocalPath, g.getLocalUncompressedName())
-}
+// func (g GenericDownload) DownloadImage() error {
+// 	// If we have a URL for this "downloader", we now pull it
+// 	if g.URL != nil {
+// 		if err := DownloadVMImage(g.URL, g.LocalPath); err != nil {
+// 			return err
+// 		}
+// 	}
+// 	return Decompress(g.LocalPath, g.getLocalUncompressedName())
+// }
 
 func (g GenericDownload) Get() *Download {
 	return &g.Download
+}
+
+func (g GenericDownload) UpdateAvailable() (bool, error) {
+	// If we have a URL for this "downloader", we now pull it
+	return g.URL != nil, nil
+}
+
+func (g GenericDownload) WriteAdditionalState() error {
+	return nil
 }
 
 // DownloadVMImage downloads a VM image from url to given path
@@ -177,21 +188,44 @@ func Decompress(localPath, uncompressedPath string) error {
 // Will error out if file without .xz already exists
 // Maybe extracting then renameing is a good idea here..
 // depends on xz: not pre-installed on mac, so it becomes a brew dependency
-func decompressXZ(src string, output io.Writer) error {
-	cmd := exec.Command("xzcat", "-k", src)
-	//cmd := exec.Command("xz", "-d", "-k", "-v", src)
-	stdOut, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
+func decompressXZ(src string, output io.WriteCloser) error {
+	var read io.Reader
+	var cmd *exec.Cmd
+	// Prefer xz utils for fastest performance, fallback to go xi2 impl
+	if _, err := exec.LookPath("xzcat"); err == nil {
+		cmd = exec.Command("xzcat", "-k", src)
+		//cmd := exec.Command("xz", "-d", "-k", "-v", src)
+		read, err = cmd.StdoutPipe()
+		if err != nil {
+			return err
+		}
+		//cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	} else {
+		file, err := os.Open(src)
+		if err != nil {
+			return err
+		}
+		read, err = xz.NewReader(file, 0)
+		if err != nil {
+			return err
+		}
 	}
-	//cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	done := make(chan bool)
 	go func() {
-		if _, err := io.Copy(output, stdOut); err != nil {
+		if _, err := io.Copy(output, read); err != nil {
 			logrus.Error(err)
 		}
+		output.Close()
+		done <- true
 	}()
-	return cmd.Run()
+
+	if cmd != nil {
+		return cmd.Run()
+	}
+	<-done
+	return nil
 }
 
 func decompressEverythingElse(src string, output io.Writer) error {

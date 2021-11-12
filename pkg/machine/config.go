@@ -1,4 +1,4 @@
-// +build amd64,!windows arm64,!windows
+// +build amd64 arm64
 
 package machine
 
@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/containers/storage/pkg/homedir"
@@ -48,6 +49,7 @@ type Download struct {
 	Sha256sum             string
 	URL                   *url.URL
 	VMName                string
+	Size                  int64
 }
 
 type ListOptions struct{}
@@ -88,7 +90,7 @@ type VM interface {
 }
 
 type DistributionDownload interface {
-	DownloadImage() error
+	UpdateAvailable() (bool, error)
 	Get() *Download
 }
 
@@ -111,10 +113,34 @@ func (rc RemoteConnectionType) MakeSSHURL(host, path, port, userName string) url
 	return uri
 }
 
+func getDataHome() (string, error) {
+	if runtime.GOOS == "windows" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, ".local", ".share"), nil
+	}
+	
+	return homedir.GetDataHome()
+}
+
+func getConfigHome() (string, error) {
+	if runtime.GOOS == "windows" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, ".config"), nil
+	}
+	
+	return homedir.GetConfigHome()
+}
+
 // GetDataDir returns the filepath where vm images should
 // live for podman-machine
 func GetDataDir(vmType string) (string, error) {
-	data, err := homedir.GetDataHome()
+	data, err := getDataHome()
 	if err != nil {
 		return "", err
 	}
@@ -129,7 +155,7 @@ func GetDataDir(vmType string) (string, error) {
 // GetConfigDir returns the filepath to where configuration
 // files for podman-machine should live
 func GetConfDir(vmType string) (string, error) {
-	conf, err := homedir.GetConfigHome()
+	conf, err := getConfigHome()
 	if err != nil {
 		return "", err
 	}

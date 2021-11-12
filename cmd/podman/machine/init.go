@@ -1,14 +1,17 @@
-// +build amd64,!windows arm64,!windows
+//go:build amd64 || arm64
+// +build amd64 arm64
 
 package machine
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/containers/common/pkg/completion"
 	"github.com/containers/podman/v3/cmd/podman/registry"
 	"github.com/containers/podman/v3/pkg/machine"
 	"github.com/containers/podman/v3/pkg/machine/qemu"
+	"github.com/containers/podman/v3/pkg/machine/wsl"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -79,6 +82,14 @@ func init() {
 	_ = initCmd.RegisterFlagCompletionFunc(IgnitionPathFlagName, completion.AutocompleteDefault)
 }
 
+func getSystemDefaultVmType() string {
+	if runtime.GOOS == "windows" {
+		return "wsl"
+	}
+
+	return "qemu"
+}
+
 // TODO should we allow for a users to append to the qemu cmdline?
 func initMachine(cmd *cobra.Command, args []string) error {
 	var (
@@ -86,11 +97,19 @@ func initMachine(cmd *cobra.Command, args []string) error {
 		vmType string
 		err    error
 	)
+
+	vmType = getSystemDefaultVmType()
 	initOpts.Name = defaultMachineName
 	if len(args) > 0 {
 		initOpts.Name = args[0]
 	}
 	switch vmType {
+	case "wsl":
+		if _, err := wsl.LoadVMByName(initOpts.Name); err == nil {
+			return errors.Wrap(machine.ErrVMAlreadyExists, initOpts.Name)
+		}
+		vm, err = wsl.NewMachine(initOpts)
+		break
 	default: // qemu is the default
 		if _, err := qemu.LoadVMByName(initOpts.Name); err == nil {
 			return errors.Wrap(machine.ErrVMAlreadyExists, initOpts.Name)

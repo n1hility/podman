@@ -1,4 +1,4 @@
-// +build amd64,!windows arm64,!windows
+// +build amd64 arm64
 
 package qemu
 
@@ -149,7 +149,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 			return err
 		}
 		v.ImagePath = dd.Get().LocalUncompressedFile
-		if err := dd.DownloadImage(); err != nil {
+		if err := machine.DownloadImage(dd); err != nil {
 			return err
 		}
 	default:
@@ -161,7 +161,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 			return err
 		}
 		v.ImagePath = g.Get().LocalUncompressedFile
-		if err := g.DownloadImage(); err != nil {
+		if err := machine.DownloadImage(g); err != nil {
 			return err
 		}
 	}

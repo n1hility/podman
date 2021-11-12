@@ -1,4 +1,4 @@
-// +build amd64,!windows arm64,!windows
+// +build amd64 arm64
 
 package machine
 
@@ -17,9 +17,9 @@ func AddConnection(uri fmt.Stringer, name, identity string, isDefault bool) erro
 	if err != nil {
 		return err
 	}
-	if _, ok := cfg.Engine.ServiceDestinations[name]; ok {
-		return errors.New("cannot overwrite connection")
-	}
+	// if _, ok := cfg.Engine.ServiceDestinations[name]; ok {
+	// 	return errors.New("cannot overwrite connection")
+	// }
 	if isDefault {
 		cfg.Engine.ActiveService = name
 	}
