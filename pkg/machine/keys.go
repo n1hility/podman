@@ -4,6 +4,8 @@
 package machine
 
 import (
+	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -28,9 +30,16 @@ func CreateSSHKeys(writeLocation string) (string, error) {
 	return strings.TrimSuffix(string(b), "\n"), nil
 }
 
-func CreateSSHKeysPrefix(dir string, file string, passThru bool, prefix ...string) (string, error) {
-	if err := generatekeysPrefix(dir, file, passThru, prefix...); err != nil {
-		return "", err
+func CreateSSHKeysPrefix(dir string, file string, passThru bool, skipExisting bool, prefix ...string) (string, error) {
+	location := filepath.Join(dir, file)
+
+	_, e := os.Stat(location)
+	if !skipExisting || errors.Is(e, os.ErrNotExist) {
+		if err := generatekeysPrefix(dir, file, passThru, prefix...); err != nil {
+			return "", err
+		}
+	} else {
+		fmt.Println("Keys already exist, reusing")
 	}
 	b, err := ioutil.ReadFile(filepath.Join(dir, file) + ".pub")
 	if err != nil {

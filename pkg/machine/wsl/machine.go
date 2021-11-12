@@ -184,21 +184,23 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 	jsonFile := filepath.Join(vmConfigDir, v.Name) + ".json"
 	v.IdentityPath = filepath.Join(sshDir, v.Name)
 
+	var dd machine.DistributionDownload
 	switch opts.ImagePath {
 	// TODO remove testing from default common config
 	case "testing", "":
 		// Get image as usual
 		v.ImageStream = defaultFedoraRelease
-		fallthrough
+		dd, err = machine.NewFedoraDownloader(vmtype, v.Name, v.ImageStream)
+		if err != nil {
+			return err
+		}
 	default:
-		var (
-			dd  machine.DistributionDownload
-			err error
-		)
-		if _, e := os.Stat(opts.ImagePath); e != nil {
+		if _, e := os.Stat(opts.ImagePath); e == nil {
+			fmt.Println("Stat success = " + opts.ImagePath)
 			v.ImageStream = "custom"
 			dd, err = machine.NewGenericDownloader(vmtype, v.Name, opts.ImagePath)
 		} else if _, e := strconv.Atoi(opts.ImagePath); e == nil {
+			v.ImageStream = opts.ImagePath
 			dd, err = machine.NewFedoraDownloader(vmtype, v.Name, v.ImageStream)
 		} else {
 			return errors.Errorf("Image not found: %s", opts.ImagePath)
@@ -206,11 +208,11 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 		if err != nil {
 			return err
 		}
+	}
 
-		v.ImagePath = dd.Get().LocalUncompressedFile
-		if err := machine.DownloadImage(dd); err != nil {
-			return err
-		}
+	v.ImagePath = dd.Get().LocalUncompressedFile
+	if err := machine.DownloadImage(dd); err != nil {
+		return err
 	}
 
 	uri := machine.SSHRemoteConnection.MakeSSHURL("localhost", "/run/user/1000/podman/podman.sock", strconv.Itoa(v.Port), v.RemoteUsername)
@@ -238,7 +240,8 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 		return errors.Wrap(err, "Could not create wsldist directory")
 	}
 
-	key, err = machine.CreateSSHKeysPrefix(sshDir, v.Name, true, "wsl")
+	fmt.Println("Creating SSH keys..")
+	key, err = machine.CreateSSHKeysPrefix(sshDir, v.Name, true, true, "wsl")
 	if err != nil {
 		return errors.Wrap(err, "Could not create ssh keys")
 	}
@@ -249,9 +252,16 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 		dist = "podman-" + dist
 	}
 
+	fmt.Println("Importing operating system into WSL...")
 	err = runCmdPassThrough("wsl", "--import", dist, distTar, v.ImagePath)
 	if err != nil {
 		return errors.Wrap(err, "WSL import of guest OS failed")
+	}
+
+	fmt.Println("Installing packages (this will take awhile)...")
+	err = runCmdPassThrough("wsl", "-d", dist, "dnf", "upgrade", "-y")
+	if err != nil {
+		return errors.Wrap(err, "Package upgrade on guest OS failed")
 	}
 
 	err = runCmdPassThrough("wsl", "-d", dist, "dnf", "install", "podman", "podman-docker", "openssh-server", "procps-ng", "-y")
@@ -259,7 +269,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 		return errors.Wrap(err, "Package installation on guest OS failed")
 	}
 
-	// Fixes newuidmap 
+	// Fixes newuidmap
 	err = runCmdPassThrough("wsl", "-d", dist, "dnf", "reinstall", "shadow-utils", "-y")
 	if err != nil {
 		return errors.Wrap(err, "Package reinstallation of shadow-utils on guest OS failed")
@@ -270,6 +280,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 	// 	return errors.Wrap(err, "Could not create ssh keys")
 	// }
 
+	fmt.Println("Configuring system...")
 	err = runCmdPassThrough("wsl", "-d", dist, "sh", "-c", fmt.Sprintf(appendPort, v.Port, v.Port))
 	if err != nil {
 		return errors.Wrap(err, "Could not configure SSH port for guest OS")
@@ -600,9 +611,9 @@ func (v *MachineVM) isRunning() bool {
 // SSH opens an interactive SSH session to the vm specified.
 // Added ssh function to VM interface: pkg/machine/config/go : line 58
 func (v *MachineVM) SSH(name string, opts machine.SSHOptions) error {
-	if !v.isRunning() {
-		return errors.Errorf("vm %q is not running.", v.Name)
-	}
+	// if !v.isRunning() {
+	// 	return errors.Errorf("vm %q is not running.", v.Name)
+	// }
 
 	username := opts.Username
 	if username == "" {

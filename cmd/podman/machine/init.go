@@ -109,7 +109,6 @@ func initMachine(cmd *cobra.Command, args []string) error {
 			return errors.Wrap(machine.ErrVMAlreadyExists, initOpts.Name)
 		}
 		vm, err = wsl.NewMachine(initOpts)
-		break
 	default: // qemu is the default
 		if _, err := qemu.LoadVMByName(initOpts.Name); err == nil {
 			return errors.Wrap(machine.ErrVMAlreadyExists, initOpts.Name)
