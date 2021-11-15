@@ -1,3 +1,4 @@
+//go:build amd64 || arm64
 // +build amd64 arm64
 
 package machine
@@ -17,6 +18,7 @@ import (
 	"github.com/containers/podman/v3/cmd/podman/validate"
 	"github.com/containers/podman/v3/pkg/machine"
 	"github.com/containers/podman/v3/pkg/machine/qemu"
+	"github.com/containers/podman/v3/pkg/machine/wsl"
 	"github.com/docker/go-units"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -69,9 +71,18 @@ func init() {
 }
 
 func list(cmd *cobra.Command, args []string) error {
-	var opts machine.ListOptions
-	// We only have qemu VM's for now
-	listResponse, err := qemu.List(opts)
+	vmType := getSystemDefaultVmType()
+	var (
+		opts         machine.ListOptions
+		listResponse []*machine.ListResponse
+		err          error
+	)
+	switch vmType {
+	case "wsl":
+		listResponse, err = wsl.List(opts)
+	default:
+		listResponse, err = qemu.List(opts)
+	}
 	if err != nil {
 		return errors.Wrap(err, "error listing vms")
 	}

@@ -4,6 +4,7 @@
 package wsl
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -18,6 +19,8 @@ import (
 	"github.com/containers/storage/pkg/homedir"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/text/encoding/unicode"
+	"golang.org/x/text/transform"
 )
 
 var (
@@ -27,8 +30,7 @@ var (
 	defaultFedoraRelease = "34"
 )
 
-const containersConf = `
-[containers]
+const containersConf = `[containers]
 netns="slirp4netns"
 
 [engine]
@@ -38,8 +40,7 @@ events_logger = "file"
 
 const appendPort = `grep -q Port\ %d /etc/ssh/sshd_config || echo Port %d >> /etc/ssh/sshd_config`
 
-const configServices = `
-ln -fs /usr/lib/systemd/system/sshd.service /etc/systemd/system/multi-user.target.wants/sshd.service
+const configServices = `ln -fs /usr/lib/systemd/system/sshd.service /etc/systemd/system/multi-user.target.wants/sshd.service
 ln -fs /usr/lib/systemd/system/podman.socket /etc/systemd/system/sockets.target.wants/podman.socket
 rm -f /etc/systemd/system/getty.target.wants/console-getty.service
 rm -f /etc/systemd/system/getty.target.wants/getty@tty1.service
@@ -52,8 +53,7 @@ mkdir -p /home/core/.config/systemd/user/
 chown core:core /home/core/.config
 `
 
-const bootstrap = `
-#!/bin/bash
+const bootstrap = `#!/bin/bash
 ps -ef | grep -v grep | grep -q systemd && exit 0
 nohup unshare --kill-child --fork --pid --mount --mount-proc --propagation shared /lib/systemd/systemd >/dev/null 2>&1 &
 sleep 0.1
@@ -61,7 +61,8 @@ sleep 0.1
 
 const wslmotd = `
 This distro hosts the podman guest os instance. System services run within a
-nested namespace. To access (e.g. via systemctl) first run the following command:
+nested namespace. To access (e.g. via systemctl) first run the following 
+command:
 
 /root/enterns
 `
@@ -76,18 +77,22 @@ fi
 
 const enterns = "#!/bin/bash\n" + sysdpid + `
 if [ "$SYSDPID" != "1" ]; then
-	nsenter -m -p -t $SYSDPID
+	nsenter -m -p -t $SYSDPID "$@"
+fi
+`
+
+const waitTerm = sysdpid + `
+if [ "$SYSDPID" != "" ]; then
+	timeout 60 tail -f /dev/null --pid $SYSDPID
 fi
 `
 
 // WSL kernel does not have sg and crypto_user modules
-const overrideSysusers = `
-[Service]
+const overrideSysusers = `[Service]
 LoadCredential=
 `
 
-const lingerService = `
-[Unit]
+const lingerService = `[Unit]
 Description=A systemd user unit demo
 After=network-online.target
 Wants=network-online.target podman.socket
@@ -95,8 +100,7 @@ Wants=network-online.target podman.socket
 ExecStart=/usr/bin/sleep infinity
 `
 
-const lingerSetup = `
-mkdir -p /home/core/.config/systemd/user/default.target.wants
+const lingerSetup = `mkdir -p /home/core/.config/systemd/user/default.target.wants
 ln -fs /home/core/.config/systemd/user/linger-example.service \
        /home/core/.config/systemd/user/default.target.wants/linger-example.service
 `
@@ -240,17 +244,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 		return errors.Wrap(err, "Could not create wsldist directory")
 	}
 
-	fmt.Println("Creating SSH keys..")
-	key, err = machine.CreateSSHKeysPrefix(sshDir, v.Name, true, true, "wsl")
-	if err != nil {
-		return errors.Wrap(err, "Could not create ssh keys")
-	}
-
-	dist := v.Name
-
-	if !strings.HasPrefix(dist, "podman") {
-		dist = "podman-" + dist
-	}
+	dist := toDist(v.Name)
 
 	fmt.Println("Importing operating system into WSL...")
 	err = runCmdPassThrough("wsl", "--import", dist, distTar, v.ImagePath)
@@ -275,10 +269,10 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 		return errors.Wrap(err, "Package reinstallation of shadow-utils on guest OS failed")
 	}
 
-	// key, err = machine.CreateSSHKeysPrefix(sshDir, v.Name, true, true, "wsl", "-d", dist)
-	// if err != nil {
-	// 	return errors.Wrap(err, "Could not create ssh keys")
-	// }
+	key, err = machine.CreateSSHKeysPrefix(sshDir, v.Name, true, true, "wsl", "-d", dist)
+	if err != nil {
+		return errors.Wrap(err, "Could not create ssh keys")
+	}
 
 	fmt.Println("Configuring system...")
 	err = runCmdPassThrough("wsl", "-d", dist, "sh", "-c", fmt.Sprintf(appendPort, v.Port, v.Port))
@@ -348,6 +342,13 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 	return err
 }
 
+func toDist(name string) string {
+	if !strings.HasPrefix(name, "podman") {
+		name = "podman-" + name
+	}
+	return name
+}
+
 func runCmdPassThrough(name string, arg ...string) error {
 	logrus.Debugf("Running command: %s %v", name, arg)
 	cmd := exec.Command(name, arg...)
@@ -366,165 +367,117 @@ func pipeCmdPassThrough(name string, input string, arg ...string) error {
 	return cmd.Run()
 }
 
-// Start executes the qemu command line and forks it
 func (v *MachineVM) Start(name string, _ machine.StartOptions) error {
-	// var (
-	// 	conn           net.Conn
-	// 	err            error
-	// 	qemuSocketConn net.Conn
-	// 	wait           time.Duration = time.Millisecond * 500
-	// )
+	if v.isRunning() {
+		return errors.Errorf("%q is already running", name)
+	}
 
-	// if err := v.startHostNetworking(); err != nil {
-	// 	return errors.Errorf("unable to start host networking: %q", err)
-	// }
+	fmt.Println("Starting machine...")
 
-	// rtPath, err := getRuntimeDir()
-	// if err != nil {
-	// 	return err
-	// }
+	dist := name
+	if !strings.HasPrefix(dist, "podman") {
+		dist = "podman-" + dist
+	}
 
-	// // If the temporary podman dir is not created, create it
-	// podmanTempDir := filepath.Join(rtPath, "podman")
-	// if _, err := os.Stat(podmanTempDir); os.IsNotExist(err) {
-	// 	if mkdirErr := os.MkdirAll(podmanTempDir, 0755); mkdirErr != nil {
-	// 		return err
-	// 	}
-	// }
-	// qemuSocketPath, _, err := v.getSocketandPid()
-	// if err != nil {
-	// 	return err
-	// }
-	// // If the qemusocketpath exists and the vm is off/down, we should rm
-	// // it before the dial as to avoid a segv
-	// if err := os.Remove(qemuSocketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-	// 	logrus.Warn(err)
-	// }
-	// for i := 0; i < 6; i++ {
-	// 	qemuSocketConn, err = net.Dial("unix", qemuSocketPath)
-	// 	if err == nil {
-	// 		break
-	// 	}
-	// 	time.Sleep(wait)
-	// 	wait++
-	// }
-	// if err != nil {
-	// 	return err
-	// }
+	err := runCmdPassThrough("wsl", "-d", dist, "/root/bootstrap")
+	if err != nil {
+		return errors.Wrap(err, "WSL bootstrap script failed")
+	}
 
-	// fd, err := qemuSocketConn.(*net.UnixConn).File()
-	// if err != nil {
-	// 	return err
-	// }
+	return err
+}
 
-	// attr := new(os.ProcAttr)
-	// files := []*os.File{os.Stdin, os.Stdout, os.Stderr, fd}
-	// attr.Files = files
-	// logrus.Debug(v.CmdLine)
-	// cmd := v.CmdLine
+func isWSLRunning(dist string) (bool, error) {
+	cmd := exec.Command("wsl", "-l", "--running")
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return false, err
+	}
+	if err = cmd.Start(); err != nil {
+		return false, err
+	}
+	scanner := bufio.NewScanner(transform.NewReader(out, unicode.UTF16(unicode.LittleEndian, unicode.UseBOM).NewDecoder()))
+	result := false
+	for scanner.Scan() {
+		text := scanner.Text()
+		if dist == text {
+			result = true
+			break
+		}
+	}
 
-	// // Disable graphic window when not in debug mode
-	// // Done in start, so we're not suck with the debug level we used on init
-	// if logrus.GetLevel() != logrus.DebugLevel {
-	// 	cmd = append(cmd, "-display", "none")
-	// }
+	_ = cmd.Wait()
 
-	// _, err = os.StartProcess(v.CmdLine[0], cmd, attr)
-	// if err != nil {
-	// 	return err
-	// }
-	// fmt.Println("Waiting for VM ...")
-	// socketPath, err := getRuntimeDir()
-	// if err != nil {
-	// 	return err
-	// }
+	return result, nil
+}
 
-	// // The socket is not made until the qemu process is running so here
-	// // we do a backoff waiting for it.  Once we have a conn, we break and
-	// // then wait to read it.
-	// for i := 0; i < 6; i++ {
-	// 	conn, err = net.Dial("unix", filepath.Join(socketPath, "podman", v.Name+"_ready.sock"))
-	// 	if err == nil {
-	// 		break
-	// 	}
-	// 	time.Sleep(wait)
-	// 	wait++
-	// }
-	// if err != nil {
-	// 	return err
-	// }
-	// _, err = bufio.NewReader(conn).ReadString('\n')
-	// return err
-	return nil
+func isSystemdRunning(dist string) (bool, error) {
+	cmd := exec.Command("wsl", "-d", dist)
+	cmd.Stdin = strings.NewReader(sysdpid + "\necho $SYSDPID\n")
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return false, err
+	}
+	if err = cmd.Start(); err != nil {
+		return false, err
+	}
+	scanner := bufio.NewScanner(out)
+	result := false
+	if scanner.Scan() {
+		text := scanner.Text()
+		i, err := strconv.Atoi(text)
+		if err == nil && i > 0 {
+			result = true
+		}
+	}
+
+	_ = cmd.Wait()
+
+	return result, nil
 }
 
 // Stop uses the qmp monitor to call a system_powerdown
 func (v *MachineVM) Stop(name string, _ machine.StopOptions) error {
-	// // check if the qmp socket is there. if not, qemu instance is gone
-	// if _, err := os.Stat(v.QMPMonitor.Address); os.IsNotExist(err) {
-	// 	// Right now it is NOT an error to stop a stopped machine
-	// 	logrus.Debugf("QMP monitor socket %v does not exist", v.QMPMonitor.Address)
-	// 	return nil
-	// }
-	// qmpMonitor, err := qmp.NewSocketMonitor(v.QMPMonitor.Network, v.QMPMonitor.Address, v.QMPMonitor.Timeout)
-	// if err != nil {
-	// 	return err
-	// }
-	// // Simple JSON formation for the QAPI
-	// stopCommand := struct {
-	// 	Execute string `json:"execute"`
-	// }{
-	// 	Execute: "system_powerdown",
-	// }
-	// input, err := json.Marshal(stopCommand)
-	// if err != nil {
-	// 	return err
-	// }
-	// if err := qmpMonitor.Connect(); err != nil {
-	// 	return err
-	// }
-	// defer func() {
-	// 	if err := qmpMonitor.Disconnect(); err != nil {
-	// 		logrus.Error(err)
-	// 	}
-	// }()
-	// if _, err = qmpMonitor.Run(input); err != nil {
-	// 	return err
-	// }
-	// qemuSocketFile, pidFile, err := v.getSocketandPid()
-	// if err != nil {
-	// 	return err
-	// }
-	// if _, err := os.Stat(pidFile); os.IsNotExist(err) {
-	// 	logrus.Info(err)
-	// 	return nil
-	// }
-	// pidString, err := ioutil.ReadFile(pidFile)
-	// if err != nil {
-	// 	return err
-	// }
-	// pidNum, err := strconv.Atoi(string(pidString))
-	// if err != nil {
-	// 	return err
-	// }
+	dist := toDist(v.Name)
 
-	// p, err := os.FindProcess(pidNum)
-	// if p == nil && err != nil {
-	// 	return err
-	// }
-	// // Kill the process
-	// if err := p.Kill(); err != nil {
-	// 	return err
-	// }
-	// // Remove the pidfile
-	// if err := os.Remove(pidFile); err != nil && !errors.Is(err, os.ErrNotExist) {
-	// 	logrus.Warn(err)
-	// }
-	// // Remove socket
-	// if err := os.Remove(qemuSocketFile); err != nil {
-	// 	return err
-	// }
+	wsl, err := isWSLRunning(dist)
+	if err != nil {
+		return err
+	}
 
+	sysd := false
+	if wsl {
+		sysd, err = isSystemdRunning(dist)
+		if err != nil {
+			return err
+		}
+	}
+
+	if !wsl || !sysd {
+		return errors.Errorf("%q is not running", v.Name)
+	}
+
+	cmd := exec.Command("wsl", "-d", dist)
+	cmd.Stdin = strings.NewReader(waitTerm)
+	if err = cmd.Start(); err != nil {
+		return errors.Wrap(err, "Error executing wait command")
+	}
+
+	exitCmd := exec.Command("wsl", "-d", dist, "/root/enterns", "systemctl", "exit", "0")
+	if err = exitCmd.Run(); err != nil {
+		return errors.Wrap(err, "Error stopping sysd")
+	}
+
+	if err = cmd.Wait(); err != nil {
+		return err
+	}
+
+	cmd = exec.Command("wsl", "--terminate", dist)
+	if err = cmd.Run(); err != nil {
+		return err
+	}
+
+	fmt.Printf("%q stopped successfully\n", v.Name)
 	return nil
 }
 
@@ -596,16 +549,22 @@ func (v *MachineVM) Remove(name string, opts machine.RemoveOptions) (string, fun
 }
 
 func (v *MachineVM) isRunning() bool {
-	// // Check if qmp socket path exists
-	// if _, err := os.Stat(v.QMPMonitor.Address); os.IsNotExist(err) {
-	// 	return false
-	// }
-	// // Check if we can dial it
-	// if _, err := qmp.NewSocketMonitor(v.QMPMonitor.Network, v.QMPMonitor.Address, v.QMPMonitor.Timeout); err != nil {
-	// 	return false
-	// }
-	// return true
-	return false
+	dist := toDist(v.Name)
+
+	wsl, err := isWSLRunning(dist)
+	if err != nil {
+		return false
+	}
+
+	sysd := false
+	if wsl {
+		sysd, err = isSystemdRunning(dist)
+		if err != nil {
+			return false
+		}
+	}
+
+	return sysd
 }
 
 // SSH opens an interactive SSH session to the vm specified.
@@ -669,7 +628,7 @@ func GetVMInfos() ([]*machine.ListResponse, error) {
 
 			listEntry.Name = vm.Name
 			listEntry.Stream = vm.ImageStream
-			listEntry.VMType = "qemu"
+			listEntry.VMType = "wsl"
 			// listEntry.CPUs = vm.CPUs
 			// listEntry.Memory = vm.Memory
 			// listEntry.DiskSize = vm.DiskSize

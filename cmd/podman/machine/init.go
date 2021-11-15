@@ -122,11 +122,18 @@ func initMachine(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	fmt.Println("Machine init complete")
 	if now {
 		err = vm.Start(initOpts.Name, machine.StartOptions{})
 		if err == nil {
 			fmt.Printf("Machine %q started successfully\n", initOpts.Name)
 		}
+	} else {
+		extra := ""
+		if initOpts.Name != defaultMachineName {
+			extra = " " + initOpts.Name
+		}
+		fmt.Printf("To start your machine run:\n\n\tpodman machine start%s\n\n", extra)
 	}
 	return err
 }

@@ -1,3 +1,4 @@
+//go:build amd64 || arm64
 // +build amd64 arm64
 
 package machine
@@ -121,7 +122,7 @@ func getDataHome() (string, error) {
 		}
 		return filepath.Join(home, ".local", ".share"), nil
 	}
-	
+
 	return homedir.GetDataHome()
 }
 
@@ -133,7 +134,7 @@ func getConfigHome() (string, error) {
 		}
 		return filepath.Join(home, ".config"), nil
 	}
-	
+
 	return homedir.GetConfigHome()
 }
 

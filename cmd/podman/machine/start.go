@@ -1,3 +1,4 @@
+//go:build amd64 || arm64
 // +build amd64 arm64
 
 package machine
@@ -8,6 +9,7 @@ import (
 	"github.com/containers/podman/v3/cmd/podman/registry"
 	"github.com/containers/podman/v3/pkg/machine"
 	"github.com/containers/podman/v3/pkg/machine/qemu"
+	"github.com/containers/podman/v3/pkg/machine/wsl"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -42,19 +44,22 @@ func start(cmd *cobra.Command, args []string) error {
 		vmName = args[0]
 	}
 
-	// We only have qemu VM's for now
-	active, activeName, err := qemu.CheckActiveVM()
-	if err != nil {
-		return err
-	}
-	if active {
-		if vmName == activeName {
-			return errors.Wrapf(machine.ErrVMAlreadyRunning, "cannot start VM %s", vmName)
-		}
-		return errors.Wrapf(machine.ErrMultipleActiveVM, "cannot start VM %s. VM %s is currently running", vmName, activeName)
-	}
+	vmType = getSystemDefaultVmType()
+
 	switch vmType {
+	case "wsl":
+		vm, err = wsl.LoadVMByName(vmName)
 	default:
+		active, activeName, err := qemu.CheckActiveVM()
+		if err != nil {
+			return err
+		}
+		if active {
+			if vmName == activeName {
+				return errors.Wrapf(machine.ErrVMAlreadyRunning, "cannot start VM %s", vmName)
+			}
+			return errors.Wrapf(machine.ErrMultipleActiveVM, "cannot start VM %s. VM %s is currently running", vmName, activeName)
+		}
 		vm, err = qemu.LoadVMByName(vmName)
 	}
 	if err != nil {
