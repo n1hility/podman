@@ -16,7 +16,6 @@ import (
 
 	"github.com/containers/podman/v3/pkg/machine"
 	"github.com/containers/podman/v3/utils"
-	"github.com/containers/storage/pkg/homedir"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/text/encoding/unicode"
@@ -29,6 +28,9 @@ var (
 	defaultRemoteUser    = "core"
 	defaultFedoraRelease = "34"
 )
+
+const ERROR_SUCCESS_REBOOT_INITIATED = 1641
+const ERROR_SUCCESS_REBOOT_REQUIRED = 3010
 
 const containersConf = `[containers]
 netns="slirp4netns"
@@ -170,20 +172,85 @@ func LoadVMByName(name string) (machine.VM, error) {
 
 // Init writes the json configuration file to the filesystem for
 // other verbs (start, stop)
-func (v *MachineVM) Init(opts machine.InitOptions) error {
+func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	var (
 		key string
 	)
-	sshDir := filepath.Join(homedir.Get(), ".ssh")
+
+	if !isWSLInstalled() {
+		admin := hasAdminRights()
+
+		if !isWSLFeatureEnabled() {
+			if !winVersionAtLeast(10, 0, 18362) {
+				errors.Errorf("Your version of Windows does not support WSL. Update to Windows 10 Build 19041 or later")
+			} else if !winVersionAtLeast(10, 0, 19041) {
+				fmt.Fprintf(os.Stderr, "Automatic installation of WSL can not be performed on this version of Windows.\n")
+				fmt.Fprintf(os.Stderr, "Either update to Build 19041 (or later), or perform the manual installation steps\n")
+				fmt.Fprintf(os.Stderr, "outlined in the following article:\n\n")
+				fmt.Fprintf(os.Stderr, "http://docs.microsoft.com/en-us/windows/wsl/install\n\n")
+				return false, errors.Errorf("WSL can not be automatically installed")
+			}
+
+			message := "WSL is not installed on this system, installing it.\n\n"
+
+			if !admin {
+				message += "Since you are not running as admin, a new window will open and " +
+					"require you to approve administrator privileges.\n\n"
+			}
+
+			message += "Once the process is complete, reboot your system and rerun \"podman machine init\""
+
+			if !opts.ReExec && MessageBox(message, "Podman Machine", false) != 1 {
+				return false, errors.Errorf("WSL installation aborted")
+			}
+
+			if !opts.ReExec && !admin {
+				err := relaunchElevatedWait()
+				return false, err
+			}
+
+			return false, installWsl()
+		}
+
+		skip := false
+		if !opts.ReExec && !admin {
+			err := relaunchElevatedWait()
+			if err != nil {
+				return false, err
+			}
+			skip = true
+		}
+
+		if !skip {
+			err := runCmdPassThrough("wsl", "--update")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Could not install the WSL Kernel. See above errors for reason.\n")
+				fmt.Fprintf(os.Stderr, "If you can not resolve the issue, and rerunning fails, try the wsl --install process\n")
+				fmt.Fprintf(os.Stderr, "outlined in the following article:\n\n")
+				fmt.Fprintf(os.Stderr, "http://docs.microsoft.com/en-us/windows/wsl/install\n\n")
+				return false, errors.Errorf("WSL update failed")
+			}
+
+			if opts.ReExec {
+				return false, nil
+			}
+		}
+	}
+
+	homeDir, err := machine.GetUserHome()
+	if err != nil {
+		return false, err
+	}
+	sshDir := filepath.Join(homeDir, ".ssh")
 	// GetConfDir creates the directory so no need to check for
 	// its existence
 	vmConfigDir, err := machine.GetConfDir(vmtype)
 	if err != nil {
-		return err
+		return false, err
 	}
 	vmDataDir, err := machine.GetDataDir(vmtype)
 	if err != nil {
-		return err
+		return false, err
 	}
 	jsonFile := filepath.Join(vmConfigDir, v.Name) + ".json"
 	v.IdentityPath = filepath.Join(sshDir, v.Name)
@@ -196,7 +263,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 		v.ImageStream = defaultFedoraRelease
 		dd, err = machine.NewFedoraDownloader(vmtype, v.Name, v.ImageStream)
 		if err != nil {
-			return err
+			return false, err
 		}
 	default:
 		if _, e := os.Stat(opts.ImagePath); e == nil {
@@ -207,41 +274,41 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 			v.ImageStream = opts.ImagePath
 			dd, err = machine.NewFedoraDownloader(vmtype, v.Name, v.ImageStream)
 		} else {
-			return errors.Errorf("Image not found: %s", opts.ImagePath)
+			return false, errors.Errorf("Image not found: %s", opts.ImagePath)
 		}
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
 
 	v.ImagePath = dd.Get().LocalUncompressedFile
 	if err := machine.DownloadImage(dd); err != nil {
-		return err
+		return false, err
 	}
 
 	uri := machine.SSHRemoteConnection.MakeSSHURL("localhost", "/run/user/1000/podman/podman.sock", strconv.Itoa(v.Port), v.RemoteUsername)
 	if err := machine.AddConnection(&uri, v.Name, filepath.Join(sshDir, v.Name), opts.IsDefault); err != nil {
-		return err
+		return false, err
 	}
 
 	uriRoot := machine.SSHRemoteConnection.MakeSSHURL("localhost", "/run/podman/podman.sock", strconv.Itoa(v.Port), "root")
 	if err := machine.AddConnection(&uriRoot, v.Name+"-root", filepath.Join(sshDir, v.Name), opts.IsDefault); err != nil {
-		return err
+		return false, err
 	}
 
 	// Write the JSON file
 	b, err := json.MarshalIndent(v, "", " ")
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := ioutil.WriteFile(jsonFile, b, 0644); err != nil {
-		return errors.Wrap(err, "Could not write machine json config")
+		return false, errors.Wrap(err, "Could not write machine json config")
 	}
 
 	distDir := filepath.Join(vmDataDir, "wsldist")
 	distTar := filepath.Join(distDir, v.Name)
 	if err := os.MkdirAll(distDir, 0755); err != nil {
-		return errors.Wrap(err, "Could not create wsldist directory")
+		return false, errors.Wrap(err, "Could not create wsldist directory")
 	}
 
 	dist := toDist(v.Name)
@@ -249,99 +316,135 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 	fmt.Println("Importing operating system into WSL...")
 	err = runCmdPassThrough("wsl", "--import", dist, distTar, v.ImagePath)
 	if err != nil {
-		return errors.Wrap(err, "WSL import of guest OS failed")
+		return false, errors.Wrap(err, "WSL import of guest OS failed")
 	}
 
 	fmt.Println("Installing packages (this will take awhile)...")
 	err = runCmdPassThrough("wsl", "-d", dist, "dnf", "upgrade", "-y")
 	if err != nil {
-		return errors.Wrap(err, "Package upgrade on guest OS failed")
+		return false, errors.Wrap(err, "Package upgrade on guest OS failed")
 	}
 
 	err = runCmdPassThrough("wsl", "-d", dist, "dnf", "install", "podman", "podman-docker", "openssh-server", "procps-ng", "-y")
 	if err != nil {
-		return errors.Wrap(err, "Package installation on guest OS failed")
+		return false, errors.Wrap(err, "Package installation on guest OS failed")
 	}
 
 	// Fixes newuidmap
 	err = runCmdPassThrough("wsl", "-d", dist, "dnf", "reinstall", "shadow-utils", "-y")
 	if err != nil {
-		return errors.Wrap(err, "Package reinstallation of shadow-utils on guest OS failed")
+		return false, errors.Wrap(err, "Package reinstallation of shadow-utils on guest OS failed")
+	}
+
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		return false, errors.Wrap(err, "Could not create ssh directory")
 	}
 
 	key, err = machine.CreateSSHKeysPrefix(sshDir, v.Name, true, true, "wsl", "-d", dist)
 	if err != nil {
-		return errors.Wrap(err, "Could not create ssh keys")
+		return false, errors.Wrap(err, "Could not create ssh keys")
 	}
 
 	fmt.Println("Configuring system...")
 	err = runCmdPassThrough("wsl", "-d", dist, "sh", "-c", fmt.Sprintf(appendPort, v.Port, v.Port))
 	if err != nil {
-		return errors.Wrap(err, "Could not configure SSH port for guest OS")
+		return false, errors.Wrap(err, "Could not configure SSH port for guest OS")
 	}
 
 	err = pipeCmdPassThrough("wsl", configServices, "-d", dist, "sh")
 	if err != nil {
-		return errors.Wrap(err, "Could not configure systemd settomgs for guest OS")
+		return false, errors.Wrap(err, "Could not configure systemd settomgs for guest OS")
 	}
 
 	err = pipeCmdPassThrough("wsl", overrideSysusers, "-d", dist, "sh", "-c",
 		"cat > /etc/systemd/system/systemd-sysusers.service.d/override.conf")
 	if err != nil {
-		return errors.Wrap(err, "Could not generate systemd-sysusers override for guest OS")
+		return false, errors.Wrap(err, "Could not generate systemd-sysusers override for guest OS")
 	}
 
 	err = pipeCmdPassThrough("wsl", lingerService, "-d", dist, "sh", "-c",
 		"cat > /home/core/.config/systemd/user/linger-example.service")
 	if err != nil {
-		return errors.Wrap(err, "Could not generate linger service for guest OS")
+		return false, errors.Wrap(err, "Could not generate linger service for guest OS")
 	}
 
 	err = pipeCmdPassThrough("wsl", lingerSetup, "-d", dist, "sh")
 	if err != nil {
-		return errors.Wrap(err, "Could not configure systemd settomgs for guest OS")
+		return false, errors.Wrap(err, "Could not configure systemd settomgs for guest OS")
 	}
 
 	err = pipeCmdPassThrough("wsl", containersConf, "-d", dist, "sh", "-c", "cat > /etc/containers.conf")
 	if err != nil {
-		return errors.Wrap(err, "Could not create containers.conf for guest OS")
+		return false, errors.Wrap(err, "Could not create containers.conf for guest OS")
 	}
 
 	err = pipeCmdPassThrough("wsl", enterns, "-d", dist, "sh", "-c", "cat > /root/enterns; chmod 755 /root/enterns")
 	if err != nil {
-		return errors.Wrap(err, "Could not create enterns script for guest OS")
+		return false, errors.Wrap(err, "Could not create enterns script for guest OS")
 	}
 
 	err = pipeCmdPassThrough("wsl", profile, "-d", dist, "sh", "-c", "cat > /etc/profile.d/wslmotd.sh")
 	if err != nil {
-		return errors.Wrap(err, "Could not create motd profile script for guest OS")
+		return false, errors.Wrap(err, "Could not create motd profile script for guest OS")
 	}
 
 	err = pipeCmdPassThrough("wsl", wslmotd, "-d", dist, "sh", "-c", "cat > /etc/wslmotd")
 	if err != nil {
-		return errors.Wrap(err, "Could not create a WSL MOTD for guest OS")
+		return false, errors.Wrap(err, "Could not create a WSL MOTD for guest OS")
 	}
 
 	err = pipeCmdPassThrough("wsl", bootstrap, "-d", dist, "sh", "-c", "cat > /root/bootstrap; chmod 755 /root/bootstrap")
 	if err != nil {
-		return errors.Wrap(err, "Could not create bootstrap script for guest OS")
+		return false, errors.Wrap(err, "Could not create bootstrap script for guest OS")
 	}
 
 	err = pipeCmdPassThrough("wsl", key+"\n", "-d", dist, "sh", "-c",
 		"mkdir -p /root/.ssh; cat >> /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys")
 	if err != nil {
-		return errors.Wrap(err, "Could not create root authorized keys on guest OS")
+		return false, errors.Wrap(err, "Could not create root authorized keys on guest OS")
 	}
 
 	err = pipeCmdPassThrough("wsl", key+"\n", "-d", dist, "sh", "-c",
 		"mkdir -p /home/core/.ssh; cat >> /home/core/.ssh/authorized_keys; chown -R core:core /home/core/.ssh; chmod 600 /home/core/.ssh/authorized_keys")
 	if err != nil {
-		return errors.Wrap(err, "Could not create core authorized keys on guest OS")
+		return false, errors.Wrap(err, "Could not create core authorized keys on guest OS")
 	}
 
-	return err
+	return true, nil
 }
 
+func installWsl() error {
+	err := runCmdPassThrough("dism", "/online", "/enable-feature", "/featurename:Microsoft-Windows-Subsystem-Linux", "/all", "/norestart")
+	if isMsiError(err) {
+		return errors.Wrap(err, "Could not enable WSL Feature")
+	}
+
+	err = runCmdPassThrough("dism", "/online", "/enable-feature", "/featurename:VirtualMachinePlatform", "/all", "/norestart")
+	if isMsiError(err) {
+		return errors.Wrap(err, "Could not enable Virtual Mchine Feature")
+	}
+
+	return reboot()
+}
+
+func isMsiError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if eerr, ok := err.(*exec.ExitError); ok {
+		switch eerr.ExitCode() {
+		case 0:
+			fallthrough
+		case ERROR_SUCCESS_REBOOT_INITIATED:
+			fallthrough
+		case ERROR_SUCCESS_REBOOT_REQUIRED:
+			return false
+		}
+	}
+
+	return true
+}
 func toDist(name string) string {
 	if !strings.HasPrefix(name, "podman") {
 		name = "podman-" + name
@@ -385,6 +488,16 @@ func (v *MachineVM) Start(name string, _ machine.StartOptions) error {
 	}
 
 	return err
+}
+
+func isWSLInstalled() bool {
+	cmd := exec.Command("wsl", "--status")
+	return cmd.Run() == nil
+}
+
+func isWSLFeatureEnabled() bool {
+	cmd := exec.Command("wsl", "--set-default-version", "2")
+	return cmd.Run() == nil
 }
 
 func isWSLRunning(dist string) (bool, error) {

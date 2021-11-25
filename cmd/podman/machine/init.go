@@ -73,6 +73,13 @@ func init() {
 		"Start machine now",
 	)
 
+	flags.BoolVar(
+		&initOpts.ReExec,
+		"reexec", false,
+		"process was rexeced",
+	)
+	flags.MarkHidden("reexec")
+
 	ImagePathFlagName := "image-path"
 	flags.StringVar(&initOpts.ImagePath, ImagePathFlagName, cfg.Machine.Image, "Path to qcow image")
 	_ = initCmd.RegisterFlagCompletionFunc(ImagePathFlagName, completion.AutocompleteDefault)
@@ -118,8 +125,11 @@ func initMachine(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	err = vm.Init(initOpts)
-	if err != nil {
+	finished, err := vm.Init(initOpts)
+	if initOpts.ReExec && err != nil {
+		wsl.MessageBox(fmt.Sprintf("Error: %v", err), "WSL Operation Failed", true)
+	}
+	if err != nil || !finished {
 		return err
 	}
 	fmt.Println("Machine init complete")

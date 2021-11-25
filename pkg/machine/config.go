@@ -25,6 +25,7 @@ type InitOptions struct {
 	Name         string
 	URI          url.URL
 	Username     string
+	ReExec       bool
 }
 
 type RemoteConnectionType string
@@ -83,7 +84,7 @@ type RemoveOptions struct {
 }
 
 type VM interface {
-	Init(opts InitOptions) error
+	Init(opts InitOptions) (bool, error)
 	Remove(name string, opts RemoveOptions) (string, func() error, error)
 	SSH(name string, opts SSHOptions) error
 	Start(name string, opts StartOptions) error
@@ -114,7 +115,7 @@ func (rc RemoteConnectionType) MakeSSHURL(host, path, port, userName string) url
 	return uri
 }
 
-func getDataHome() (string, error) {
+func GetDataHome() (string, error) {
 	if runtime.GOOS == "windows" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -124,6 +125,18 @@ func getDataHome() (string, error) {
 	}
 
 	return homedir.GetDataHome()
+}
+
+func GetUserHome() (string, error) {
+	if runtime.GOOS == "windows" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return home, nil
+	}
+
+	return homedir.Get(), nil
 }
 
 func getConfigHome() (string, error) {
@@ -141,7 +154,7 @@ func getConfigHome() (string, error) {
 // GetDataDir returns the filepath where vm images should
 // live for podman-machine
 func GetDataDir(vmType string) (string, error) {
-	data, err := getDataHome()
+	data, err := GetDataHome()
 	if err != nil {
 		return "", err
 	}

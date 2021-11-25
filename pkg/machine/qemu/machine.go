@@ -126,7 +126,7 @@ func LoadVMByName(name string) (machine.VM, error) {
 
 // Init writes the json configuration file to the filesystem for
 // other verbs (start, stop)
-func (v *MachineVM) Init(opts machine.InitOptions) error {
+func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	var (
 		key string
 	)
@@ -135,7 +135,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 	// its existence
 	vmConfigDir, err := machine.GetConfDir(vmtype)
 	if err != nil {
-		return err
+		return false, err
 	}
 	jsonFile := filepath.Join(vmConfigDir, v.Name) + ".json"
 	v.IdentityPath = filepath.Join(sshDir, v.Name)
@@ -146,11 +146,11 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 		v.ImageStream = opts.ImagePath
 		dd, err := machine.NewFcosDownloader(vmtype, v.Name, opts.ImagePath)
 		if err != nil {
-			return err
+			return false, err
 		}
 		v.ImagePath = dd.Get().LocalUncompressedFile
 		if err := machine.DownloadImage(dd); err != nil {
-			return err
+			return false, err
 		}
 	default:
 		// The user has provided an alternate image which can be a file path
@@ -158,11 +158,11 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 		v.ImageStream = "custom"
 		g, err := machine.NewGenericDownloader(vmtype, v.Name, opts.ImagePath)
 		if err != nil {
-			return err
+			return false, err
 		}
 		v.ImagePath = g.Get().LocalUncompressedFile
 		if err := machine.DownloadImage(g); err != nil {
-			return err
+			return false, err
 		}
 	}
 	// Add arch specific options including image location
@@ -174,12 +174,12 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 	if len(opts.IgnitionPath) < 1 {
 		uri := machine.SSHRemoteConnection.MakeSSHURL("localhost", "/run/user/1000/podman/podman.sock", strconv.Itoa(v.Port), v.RemoteUsername)
 		if err := machine.AddConnection(&uri, v.Name, filepath.Join(sshDir, v.Name), opts.IsDefault); err != nil {
-			return err
+			return false, err
 		}
 
 		uriRoot := machine.SSHRemoteConnection.MakeSSHURL("localhost", "/run/podman/podman.sock", strconv.Itoa(v.Port), "root")
 		if err := machine.AddConnection(&uriRoot, v.Name+"-root", filepath.Join(sshDir, v.Name), opts.IsDefault); err != nil {
-			return err
+			return false, err
 		}
 	} else {
 		fmt.Println("An ignition path was provided.  No SSH connection was added to Podman")
@@ -187,10 +187,10 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 	// Write the JSON file
 	b, err := json.MarshalIndent(v, "", " ")
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := ioutil.WriteFile(jsonFile, b, 0644); err != nil {
-		return err
+		return false, err
 	}
 
 	// User has provided ignition file so keygen
@@ -198,17 +198,17 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 	if len(opts.IgnitionPath) < 1 {
 		key, err = machine.CreateSSHKeys(v.IdentityPath)
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
 	// Run arch specific things that need to be done
 	if err := v.prepare(); err != nil {
-		return err
+		return false, err
 	}
 
 	originalDiskSize, err := getDiskSize(v.ImagePath)
 	if err != nil {
-		return err
+		return false, err
 	}
 	// Resize the disk image to input disk size
 	// only if the virtualdisk size is less than
@@ -218,7 +218,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 		resize.Stdout = os.Stdout
 		resize.Stderr = os.Stderr
 		if err := resize.Run(); err != nil {
-			return errors.Errorf("error resizing image: %q", err)
+			return false, errors.Errorf("error resizing image: %q", err)
 		}
 	}
 	// If the user provides an ignition file, we need to
@@ -226,9 +226,9 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 	if len(opts.IgnitionPath) > 0 {
 		inputIgnition, err := ioutil.ReadFile(opts.IgnitionPath)
 		if err != nil {
-			return err
+			return false, err
 		}
-		return ioutil.WriteFile(v.IgnitionFilePath, inputIgnition, 0644)
+		return false, ioutil.WriteFile(v.IgnitionFilePath, inputIgnition, 0644)
 	}
 	// Write the ignition file
 	ign := machine.DynamicIgnition{
@@ -237,7 +237,8 @@ func (v *MachineVM) Init(opts machine.InitOptions) error {
 		VMName:    v.Name,
 		WritePath: v.IgnitionFilePath,
 	}
-	return machine.NewIgnitionFile(ign)
+	err = machine.NewIgnitionFile(ign)
+	return err == nil, err
 }
 
 // Start executes the qemu command line and forks it
