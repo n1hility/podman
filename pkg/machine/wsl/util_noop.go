@@ -44,6 +44,7 @@ func getCommandLine() string {
 		len++	
 	}
 
+
 	var runes []uint16
 	assignSlice(unsafe.Pointer(&runes), cmd, len)
 	return string(utf16.Decode(runes))

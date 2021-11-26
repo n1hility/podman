@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -39,6 +38,21 @@ type SHELLEXECUTEINFO struct {
 	hProcess       syscall.Handle
 }
 
+type Luid struct {
+	lowPart  uint32
+	highPart int32
+}
+
+type LuidAndAttributes struct {
+	luid       Luid
+	attributes uint32
+}
+
+type TokenPrivileges struct {
+	privilegeCount uint32
+	privileges     [1]LuidAndAttributes
+}
+
 const (
 	SEE_MASK_NOCLOSEPROCESS         = 0x40
 	EWX_FORCEIFHUNG                 = 0x10
@@ -47,6 +61,9 @@ const (
 	SHTDN_REASON_MAJOR_APPLICATION  = 0x00040000
 	SHTDN_REASON_MINOR_INSTALLATION = 0x00000002
 	SHTDN_REASON_FLAG_PLANNED       = 0x80000000
+	TOKEN_ADJUST_PRIVILEGES         = 0x0020
+	TOKEN_QUERY                     = 0x0008
+	SE_PRIVILEGE_ENABLED            = 0x00000002
 )
 
 func winVersionAtLeast(major uint, minor uint, build uint) bool {
@@ -175,8 +192,15 @@ func assignSlice(slice unsafe.Pointer, data unsafe.Pointer, len int) {
 }
 
 func reboot() error {
+	const (
+		wtLocation   = `Microsoft\WindowsApps\wt.exe`
+		wtPrefix     = `%LocalAppData%\Microsoft\WindowsApps\wt -p "Windows PowerShell" `
+		localAppData = "LocalAppData"
+		pShellLaunch = `powershell -noexit "powershell -EncodedCommand (Get-Content '%s')"`
+	)
+
 	exe, _ := os.Executable()
-	relaunch := fmt.Sprintf("%s %s", exe, buildCommandArgs(false))
+	relaunch := fmt.Sprintf("& %s %s", syscall.EscapeArg(exe), buildCommandArgs(false))
 	encoded := base64.StdEncoding.EncodeToString(encodeUTF16Bytes(relaunch))
 
 	dataDir, err := machine.GetDataHome()
@@ -187,16 +211,21 @@ func reboot() error {
 	if err != nil {
 		return errors.Wrap(err, "Could not create data directory")
 	}
-	commFile := filepath.Join(dataDir, "podman-relaunch-command.dat")
+	commFile := filepath.Join(dataDir, "podman-relaunch.dat")
 	err = ioutil.WriteFile(commFile, []byte(encoded), 0600)
 	if err != nil {
 		return errors.Wrap(err, "Could not serialize command state")
 	}
 
-	command := fmt.Sprintf("powershell -noexit -EncodedCommand (Get-Content '%s' -Raw)", commFile)
-	_, err = exec.LookPath("wt")
+	command := fmt.Sprintf(pShellLaunch, commFile)
+	_, err = os.Lstat(filepath.Join(os.Getenv(localAppData), wtLocation))
 	if err == nil {
-		command = "wt -p \"Windows PowerShell\" " + command
+		wtCommand := wtPrefix + command
+		// RunOnce is limited to 260 chars (supposedly no longer in Builds >= 19489)
+		// For now fallbacak in cases of long usernames (>89 chars)
+		if len(wtCommand) < 260 {
+			command = wtCommand
+		}
 	}
 
 	err = addRunOnceRegistryEntry(command)
@@ -204,14 +233,58 @@ func reboot() error {
 		return err
 	}
 
-	user32 := syscall.NewLazyDLL("user32")
+	err = obtainShutdownPrivilege()
+	if err != nil {
+		return err
+	}
 
+	message := "To continue the process of enabling WSL, the system needs to reboot. " +
+		"Alternatively, you can cancel and reboot manually"
+
+	if MessageBox(message, "Podman Machine", false) != 1 {
+		return errors.Errorf("Reboot declined. Reboot manually when ready to continue installation.")
+	}
+
+	user32 := syscall.NewLazyDLL("user32")
 	procExit := user32.NewProc("ExitWindowsEx")
-	ret, _, err := procExit.Call(EWX_RESTARTAPPS|EWX_FORCEIFHUNG,
+	ret, _, err := procExit.Call(EWX_REBOOT|EWX_RESTARTAPPS|EWX_FORCEIFHUNG,
 		SHTDN_REASON_MAJOR_APPLICATION|SHTDN_REASON_MINOR_INSTALLATION|SHTDN_REASON_FLAG_PLANNED)
 
 	if ret != 1 {
 		return errors.Wrap(err, "Reboot failed")
+	}
+
+	return nil
+}
+
+func obtainShutdownPrivilege() error {
+	const SeShutdownName = "SeShutdownPrivilege"
+
+	advapi32 := syscall.NewLazyDLL("advapi32")
+	OpenProcessToken := advapi32.NewProc("OpenProcessToken")
+	LookupPrivilegeValue := advapi32.NewProc("LookupPrivilegeValueW")
+	AdjustTokenPrivileges := advapi32.NewProc("AdjustTokenPrivileges")
+
+	proc, _ := syscall.GetCurrentProcess()
+
+	var hToken uintptr
+	ret, _, err := OpenProcessToken.Call(uintptr(proc), TOKEN_ADJUST_PRIVILEGES|TOKEN_QUERY, uintptr(unsafe.Pointer(&hToken)))
+	if ret != 1 {
+		return errors.Wrap(err, "Error opening process token")
+	}
+
+	var privs TokenPrivileges
+	ret, _, err = LookupPrivilegeValue.Call(uintptr(0), uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(SeShutdownName))), uintptr(unsafe.Pointer(&(privs.privileges[0].luid))))
+	if ret != 1 {
+		return errors.Wrap(err, "Error looking up shutdown privilege")
+	}
+
+	privs.privilegeCount = 1
+	privs.privileges[0].attributes = SE_PRIVILEGE_ENABLED
+
+	ret, _, err = AdjustTokenPrivileges.Call(hToken, 0, uintptr(unsafe.Pointer(&privs)), 0, uintptr(0), 0)
+	if ret != 1 {
+		return errors.Wrap(err, "Error enabling shutdown privilege on token")
 	}
 
 	return nil
@@ -225,20 +298,20 @@ func addRunOnceRegistryEntry(command string) error {
 
 	defer k.Close()
 
-	err = k.SetStringValue("podman-machine", command)
+	err = k.SetExpandStringValue("podman-machine", command)
 	if err != nil {
 		return errors.Wrap(err, "Could not open RunOnce registry entry")
 	}
-	
+
 	return nil
 }
 
 func encodeUTF16Bytes(s string) []byte {
 	u16 := utf16.Encode([]rune(s))
 	u16le := make([]byte, len(u16)*2)
-	for i := 0; i < len(u16)*2; i += 2 {
-		u16le[i] = byte(u16[i])
-		u16le[i+1] = byte(u16[i] >> 8)
+	for i := 0; i < len(u16); i++ {
+		u16le[i<<1] = byte(u16[i])
+		u16le[(i<<1)+1] = byte(u16[i] >> 8)
 	}
 	return u16le
 }
@@ -251,11 +324,10 @@ func MessageBox(caption, title string, fail bool) int {
 		format = 0x41
 	}
 
-	shell32 := syscall.NewLazyDLL("shell32.dll")
-
+	user32 := syscall.NewLazyDLL("user32.dll")
 	captionPtr, _ := syscall.UTF16PtrFromString(caption)
 	titlePtr, _ := syscall.UTF16PtrFromString(title)
-	ret, _, _ := shell32.NewProc("MessageBoxW").Call(
+	ret, _, _ := user32.NewProc("MessageBoxW").Call(
 		uintptr(0),
 		uintptr(unsafe.Pointer(captionPtr)),
 		uintptr(unsafe.Pointer(titlePtr)),
@@ -265,8 +337,8 @@ func MessageBox(caption, title string, fail bool) int {
 }
 
 func buildCommandArgs(elevate bool) string {
-	args := os.Args[1:]
-	for _, arg := range args {
+	var args []string
+	for _, arg := range os.Args[1:] {
 		if arg != "--reexec" {
 			args = append(args, syscall.EscapeArg(arg))
 			if elevate && arg == "init" {

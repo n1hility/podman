@@ -11,8 +11,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/containers/podman/v3/pkg/machine"
 	"github.com/containers/podman/v3/utils"
@@ -198,7 +200,8 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 					"require you to approve administrator privileges.\n\n"
 			}
 
-			message += "Once the process is complete, reboot your system and rerun \"podman machine init\""
+			message += "NOTE: A system reboot will be required as part of this process. " +
+					"If you prefer, you may abort now, and perform a manual installation using the \"wsl --install\" command."
 
 			if !opts.ReExec && MessageBox(message, "Podman Machine", false) != 1 {
 				return false, errors.Errorf("WSL installation aborted")
@@ -424,7 +427,23 @@ func installWsl() error {
 		return errors.Wrap(err, "Could not enable Virtual Mchine Feature")
 	}
 
-	return reboot()
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println("panic occurred:", err)
+			fmt.Println("stacktrace from panic: \n" + string(debug.Stack()))
+			time.Sleep(2 * time.Minute)
+		}
+	}()
+
+	err = reboot()
+	if err != nil {
+		MessageBox(fmt.Sprintf("%v", err), "error", true)
+	} else {
+		fmt.Println("No errors!")
+	}
+	time.Sleep(5 * time.Second)
+
+	return err
 }
 
 func isMsiError(err error) bool {
