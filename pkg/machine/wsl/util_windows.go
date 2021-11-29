@@ -64,6 +64,7 @@ const (
 	TOKEN_ADJUST_PRIVILEGES         = 0x0020
 	TOKEN_QUERY                     = 0x0008
 	SE_PRIVILEGE_ENABLED            = 0x00000002
+	SE_ERR_ACCESSDENIED             = 0x05
 )
 
 func winVersionAtLeast(major uint, minor uint, build uint) bool {
@@ -151,7 +152,11 @@ func relaunchElevatedWait() error {
 	procShellExecuteEx := shell32.NewProc("ShellExecuteExW")
 	ret, _, _ := procShellExecuteEx.Call(uintptr(unsafe.Pointer(info)))
 	if ret == 0 {
-		return syscall.GetLastError()
+		err := syscall.GetLastError()
+		if info.hInstApp == SE_ERR_ACCESSDENIED {
+			return wrapMaybe(err, "Request to elevate privileges was denied")
+		}
+		return wrapMaybef(err, "Could not launch process, ShellEX Error = %d", info.hInstApp)
 	}
 
 	handle := syscall.Handle(info.hProcess)
@@ -167,7 +172,31 @@ func relaunchElevatedWait() error {
 		return errors.Errorf("Could not wait for process, unknown error")
 	}
 	var code uint32
-	return syscall.GetExitCodeProcess(handle, &code)
+	err = syscall.GetExitCodeProcess(handle, &code)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return &ExitCodeError{uint(code)}
+	}
+
+	return nil
+}
+
+func wrapMaybe(err error, message string) error {
+	if err != nil {
+		return errors.Wrap(err, message)
+	}
+
+	return errors.New(message)
+}
+
+func wrapMaybef(err error, format string, args ...interface{}) error {
+	if err != nil {
+		return errors.Wrapf(err, format, args)
+	}
+
+	return errors.Errorf(format, args)
 }
 
 func getCommandLine() string {
@@ -239,10 +268,12 @@ func reboot() error {
 	}
 
 	message := "To continue the process of enabling WSL, the system needs to reboot. " +
-		"Alternatively, you can cancel and reboot manually"
+		"Alternatively, you can cancel and reboot manually\n\n" +
+		"After rebooting, please wait a minute or two for podman machine to relaunch and continue installing."
 
 	if MessageBox(message, "Podman Machine", false) != 1 {
-		return errors.Errorf("Reboot declined. Reboot manually when ready to continue installation.")
+		os.Exit(ERROR_SUCCESS_REBOOT_REQUIRED)
+		return nil
 	}
 
 	user32 := syscall.NewLazyDLL("user32")

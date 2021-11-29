@@ -7,14 +7,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime/debug"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/containers/podman/v3/pkg/machine"
 	"github.com/containers/podman/v3/utils"
@@ -109,6 +108,16 @@ ln -fs /home/core/.config/systemd/user/linger-example.service \
        /home/core/.config/systemd/user/default.target.wants/linger-example.service
 `
 
+const wslInstallError = `Could not %s. See previous output for any potential failure details. 
+If you can not resolve the issue, and rerunning fails, try the "wsl --install" process
+outlined in the following article:
+
+http://docs.microsoft.com/en-us/windows/wsl/install
+
+`
+
+const wslInstallKernel = "install the WSL Kernel"
+
 type MachineVM struct {
 	// IdentityPath is the fq path to the ssh priv key
 	IdentityPath string
@@ -122,6 +131,14 @@ type MachineVM struct {
 	Port int
 	// RemoteUsername of the vm user
 	RemoteUsername string
+}
+
+type ExitCodeError struct {
+	code uint
+}
+
+func (e *ExitCodeError) Error() string {
+	return fmt.Sprintf("Process failed with exit code: %d", e.code)
 }
 
 // NewMachine initializes an instance of a virtual machine based on the qemu
@@ -179,65 +196,9 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 		key string
 	)
 
-	if !isWSLInstalled() {
-		admin := hasAdminRights()
-
-		if !isWSLFeatureEnabled() {
-			if !winVersionAtLeast(10, 0, 18362) {
-				errors.Errorf("Your version of Windows does not support WSL. Update to Windows 10 Build 19041 or later")
-			} else if !winVersionAtLeast(10, 0, 19041) {
-				fmt.Fprintf(os.Stderr, "Automatic installation of WSL can not be performed on this version of Windows.\n")
-				fmt.Fprintf(os.Stderr, "Either update to Build 19041 (or later), or perform the manual installation steps\n")
-				fmt.Fprintf(os.Stderr, "outlined in the following article:\n\n")
-				fmt.Fprintf(os.Stderr, "http://docs.microsoft.com/en-us/windows/wsl/install\n\n")
-				return false, errors.Errorf("WSL can not be automatically installed")
-			}
-
-			message := "WSL is not installed on this system, installing it.\n\n"
-
-			if !admin {
-				message += "Since you are not running as admin, a new window will open and " +
-					"require you to approve administrator privileges.\n\n"
-			}
-
-			message += "NOTE: A system reboot will be required as part of this process. " +
-					"If you prefer, you may abort now, and perform a manual installation using the \"wsl --install\" command."
-
-			if !opts.ReExec && MessageBox(message, "Podman Machine", false) != 1 {
-				return false, errors.Errorf("WSL installation aborted")
-			}
-
-			if !opts.ReExec && !admin {
-				err := relaunchElevatedWait()
-				return false, err
-			}
-
-			return false, installWsl()
-		}
-
-		skip := false
-		if !opts.ReExec && !admin {
-			err := relaunchElevatedWait()
-			if err != nil {
-				return false, err
-			}
-			skip = true
-		}
-
-		if !skip {
-			err := runCmdPassThrough("wsl", "--update")
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Could not install the WSL Kernel. See above errors for reason.\n")
-				fmt.Fprintf(os.Stderr, "If you can not resolve the issue, and rerunning fails, try the wsl --install process\n")
-				fmt.Fprintf(os.Stderr, "outlined in the following article:\n\n")
-				fmt.Fprintf(os.Stderr, "http://docs.microsoft.com/en-us/windows/wsl/install\n\n")
-				return false, errors.Errorf("WSL update failed")
-			}
-
-			if opts.ReExec {
-				return false, nil
-			}
-		}
+	cont, err := checkAndInstallWSL(opts)
+	if (! cont) {
+		return cont, err
 	}
 
 	homeDir, err := machine.GetUserHome()
@@ -416,34 +377,176 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	return true, nil
 }
 
+func checkAndInstallWSL(opts machine.InitOptions) (bool, error) {
+	if !isWSLInstalled() {
+		admin := hasAdminRights()
+
+		if !isWSLFeatureEnabled() {
+			if !winVersionAtLeast(10, 0, 18362) {
+				errors.Errorf("Your version of Windows does not support WSL. Update to Windows 10 Build 19041 or later")
+			} else if !winVersionAtLeast(10, 0, 19041) {
+				fmt.Fprintf(os.Stderr, "Automatic installation of WSL can not be performed on this version of Windows.\n")
+				fmt.Fprintf(os.Stderr, "Either update to Build 19041 (or later), or perform the manual installation steps\n")
+				fmt.Fprintf(os.Stderr, "outlined in the following article:\n\n")
+				fmt.Fprintf(os.Stderr, "http://docs.microsoft.com/en-us/windows/wsl/install\n\n")
+				return false, errors.Errorf("WSL can not be automatically installed")
+			}
+
+			message := "WSL is not installed on this system, installing it.\n\n"
+
+			if !admin {
+				message += "Since you are not running as admin, a new window will open and " +
+					"require you to approve administrator privileges.\n\n"
+			}
+
+			message += "NOTE: A system reboot will be required as part of this process. " +
+				"If you prefer, you may abort now, and perform a manual installation using the \"wsl --install\" command."
+
+			if !opts.ReExec && MessageBox(message, "Podman Machine", false) != 1 {
+				return false, errors.Errorf("WSL installation aborted")
+			}
+
+			if !opts.ReExec && !admin {
+				err := launchElevate("install the Windows WSL Features")
+				return false, err
+			}
+
+			return false, installWsl()
+		}
+
+		skip := false
+		if !opts.ReExec && !admin {
+			if err := launchElevate(wslInstallKernel); err != nil {
+				return false, err
+			}
+			skip = true
+		}
+
+		if !skip {
+			err := installWslKernel()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, wslInstallError, wslInstallKernel)
+				return false, err
+			}
+
+			if opts.ReExec {
+				return false, nil
+			}
+		}
+	}
+
+	return true, nil
+}
+
+func launchElevate(operation string) error {
+	truncateElevatedOutputFile()
+	err := relaunchElevatedWait()
+	if err != nil {
+		if eerr, ok := err.(*ExitCodeError); ok {
+			if eerr.code == ERROR_SUCCESS_REBOOT_REQUIRED {
+				fmt.Println("Reboot is required to continue installation, please reboot at your convenience")
+				return nil
+			}
+		}
+
+		fmt.Fprintf(os.Stderr, "Elevated process failed with error: %v\n\n", err)
+		dumpOutputFile()
+		fmt.Fprintf(os.Stderr, wslInstallError, operation)
+	}
+	return err
+}
+
 func installWsl() error {
-	err := runCmdPassThrough("dism", "/online", "/enable-feature", "/featurename:Microsoft-Windows-Subsystem-Linux", "/all", "/norestart")
+	log, err := getElevatedOutputFileWrite()
+	if err != nil {
+		return err
+	}
+	defer log.Close()
+	err = runCmdPassThroughTee(log, "dism", "/online", "/enable-feature", "/featurename:Microsoft-Windows-Subsystem-Linux", "/all", "/norestart")
 	if isMsiError(err) {
 		return errors.Wrap(err, "Could not enable WSL Feature")
 	}
 
-	err = runCmdPassThrough("dism", "/online", "/enable-feature", "/featurename:VirtualMachinePlatform", "/all", "/norestart")
+	err = runCmdPassThroughTee(log, "dism", "/online", "/enable-feature", "/featurename:VirtualMachinePlatform", "/all", "/norestart")
 	if isMsiError(err) {
 		return errors.Wrap(err, "Could not enable Virtual Mchine Feature")
 	}
+	log.Close()
 
-	defer func() {
-		if err := recover(); err != nil {
-			fmt.Println("panic occurred:", err)
-			fmt.Println("stacktrace from panic: \n" + string(debug.Stack()))
-			time.Sleep(2 * time.Minute)
-		}
-	}()
+	return reboot()
+}
 
-	err = reboot()
+func installWslKernel() error {
+	log, err := getElevatedOutputFileWrite()
 	if err != nil {
-		MessageBox(fmt.Sprintf("%v", err), "error", true)
-	} else {
-		fmt.Println("No errors!")
+		return err
 	}
-	time.Sleep(5 * time.Second)
+	defer log.Close()
 
-	return err
+	message := "Installing WSL Kernel Update"
+	fmt.Println(message)
+	fmt.Fprintln(log, message)
+
+	err = runCmdPassThroughTee(log, "wsl", "--update")
+	if err != nil {
+		return errors.Wrap(err, "Could not install WSL Kernel")
+	}
+	return nil
+}
+
+func getElevatedOutputFileName() (string, error) {
+	dir, err := machine.GetDataHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "podman-elevated-output.log"), nil
+}
+
+func dumpOutputFile() {
+	file, err := getElevatedOutputFileRead()
+	if err != nil {
+		logrus.Debug("Could not find elevated child output file")
+		return
+	}
+	defer file.Close()
+	_, _ = io.Copy(os.Stdout, file)
+}
+
+func getElevatedOutputFileRead() (*os.File, error) {
+	return getElevatedOutputFile(os.O_RDONLY)
+
+}
+
+func getElevatedOutputFileWrite() (*os.File, error) {
+	return getElevatedOutputFile(os.O_WRONLY | os.O_CREATE | os.O_TRUNC)
+}
+
+func truncateElevatedOutputFile() error {
+	name, err := getElevatedOutputFileName()
+	if err != nil {
+		return err
+	}
+
+	return os.Truncate(name, 0)
+}
+
+func getElevatedOutputFile(mode int) (*os.File, error) {
+	name, err := getElevatedOutputFileName()
+	if err != nil {
+		return nil, err
+	}
+
+	dir, err := machine.GetDataHome()
+	if err != nil {
+		return nil, err
+	}
+
+	err = os.MkdirAll(dir, 0755)
+	if err != nil {
+		return nil, err
+	}
+
+	return os.OpenFile(name, mode, 0644)
 }
 
 func isMsiError(err error) bool {
@@ -480,6 +583,18 @@ func runCmdPassThrough(name string, arg ...string) error {
 	return cmd.Run()
 }
 
+func runCmdPassThroughTee(out io.Writer, name string, arg ...string) error {
+	logrus.Debugf("Running command: %s %v", name, arg)
+
+	// TODO - Perhaps improve this with a conpty pseudo console so that
+	//        dism installer text bars mirror console behavior (redraw)
+	cmd := exec.Command(name, arg...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = io.MultiWriter(os.Stdout, out)
+	cmd.Stderr = io.MultiWriter(os.Stderr, out)
+	return cmd.Run()
+}
+
 func pipeCmdPassThrough(name string, input string, arg ...string) error {
 	logrus.Debugf("Running command: %s %v", name, arg)
 	cmd := exec.Command(name, arg...)
@@ -511,7 +626,11 @@ func (v *MachineVM) Start(name string, _ machine.StartOptions) error {
 
 func isWSLInstalled() bool {
 	cmd := exec.Command("wsl", "--status")
-	return cmd.Run() == nil
+	success := cmd.Run() == nil
+	if success {
+		fmt.Println("WSL Status SUCCESS")
+	}
+	return success
 }
 
 func isWSLFeatureEnabled() bool {

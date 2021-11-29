@@ -126,9 +126,6 @@ func initMachine(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	finished, err := vm.Init(initOpts)
-	if initOpts.ReExec && err != nil {
-		wsl.MessageBox(fmt.Sprintf("Error: %v", err), "WSL Operation Failed", true)
-	}
 	if err != nil || !finished {
 		return err
 	}
