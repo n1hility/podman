@@ -197,7 +197,8 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	)
 
 	cont, err := checkAndInstallWSL(opts)
-	if (! cont) {
+	if !cont {
+		appendOutputIfError(opts.ReExec, err)
 		return cont, err
 	}
 
@@ -270,15 +271,14 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	}
 
 	distDir := filepath.Join(vmDataDir, "wsldist")
-	distTar := filepath.Join(distDir, v.Name)
+	distTarget := filepath.Join(distDir, v.Name)
 	if err := os.MkdirAll(distDir, 0755); err != nil {
 		return false, errors.Wrap(err, "Could not create wsldist directory")
 	}
 
 	dist := toDist(v.Name)
-
-	fmt.Println("Importing operating system into WSL...")
-	err = runCmdPassThrough("wsl", "--import", dist, distTar, v.ImagePath)
+	fmt.Println("Importing operating system into WSL (this may take several minutes)...")
+	err = runCmdPassThrough("wsl", "--import", dist, distTarget, v.ImagePath)
 	if err != nil {
 		return false, errors.Wrap(err, "WSL import of guest OS failed")
 	}
@@ -419,6 +419,7 @@ func checkAndInstallWSL(opts machine.InitOptions) (bool, error) {
 			if err := launchElevate(wslInstallKernel); err != nil {
 				return false, err
 			}
+
 			skip = true
 		}
 
@@ -469,7 +470,7 @@ func installWsl() error {
 
 	err = runCmdPassThroughTee(log, "dism", "/online", "/enable-feature", "/featurename:VirtualMachinePlatform", "/all", "/norestart")
 	if isMsiError(err) {
-		return errors.Wrap(err, "Could not enable Virtual Mchine Feature")
+		return errors.Wrap(err, "Could not enable Virtual Machine Feature")
 	}
 	log.Close()
 
@@ -491,6 +492,7 @@ func installWslKernel() error {
 	if err != nil {
 		return errors.Wrap(err, "Could not install WSL Kernel")
 	}
+
 	return nil
 }
 
@@ -518,7 +520,19 @@ func getElevatedOutputFileRead() (*os.File, error) {
 }
 
 func getElevatedOutputFileWrite() (*os.File, error) {
-	return getElevatedOutputFile(os.O_WRONLY | os.O_CREATE | os.O_TRUNC)
+	return getElevatedOutputFile(os.O_WRONLY | os.O_CREATE | os.O_APPEND)
+}
+
+func appendOutputIfError(write bool, err error) {
+	if write && err == nil {
+		return
+	}
+
+	file, oerr := getElevatedOutputFileWrite()
+	if oerr == nil {
+		defer file.Close()
+		fmt.Fprintf(file, "Error: %v\n", err)
+	}
 }
 
 func truncateElevatedOutputFile() error {
@@ -650,8 +664,8 @@ func isWSLRunning(dist string) (bool, error) {
 	scanner := bufio.NewScanner(transform.NewReader(out, unicode.UTF16(unicode.LittleEndian, unicode.UseBOM).NewDecoder()))
 	result := false
 	for scanner.Scan() {
-		text := scanner.Text()
-		if dist == text {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) > 0 && dist == fields[0] {
 			result = true
 			break
 		}
@@ -733,70 +747,55 @@ func (v *MachineVM) Stop(name string, _ machine.StopOptions) error {
 }
 
 func (v *MachineVM) Remove(name string, opts machine.RemoveOptions) (string, func() error, error) {
-	// var (
-	// 	files []string
-	// )
+	var files []string
 
-	// // cannot remove a running vm
-	// if v.isRunning() {
-	// 	return "", nil, errors.Errorf("running vm %q cannot be destroyed", v.Name)
-	// }
+	if v.isRunning() {
+		return "", nil, errors.Errorf("running vm %q cannot be destroyed", v.Name)
+	}
 
-	// // Collect all the files that need to be destroyed
-	// if !opts.SaveKeys {
-	// 	files = append(files, v.IdentityPath, v.IdentityPath+".pub")
-	// }
-	// if !opts.SaveIgnition {
-	// 	files = append(files, v.IgnitionFilePath)
-	// }
-	// if !opts.SaveImage {
-	// 	files = append(files, v.ImagePath)
-	// }
-	// files = append(files, v.archRemovalFiles()...)
+	// Collect all the files that need to be destroyed
+	if !opts.SaveKeys {
+		files = append(files, v.IdentityPath, v.IdentityPath+".pub")
+	}
+	if !opts.SaveImage {
+		files = append(files, v.ImagePath)
+	}
 
-	// if err := machine.RemoveConnection(v.Name); err != nil {
-	// 	logrus.Error(err)
-	// }
-	// if err := machine.RemoveConnection(v.Name + "-root"); err != nil {
-	// 	logrus.Error(err)
-	// }
+	vmConfigDir, err := machine.GetConfDir(vmtype)
+	if err != nil {
+		return "", nil, err
+	}
+	files = append(files, filepath.Join(vmConfigDir, v.Name+".json"))
 
-	// vmConfigDir, err := machine.GetConfDir(vmtype)
-	// if err != nil {
-	// 	return "", nil, err
-	// }
-	// files = append(files, filepath.Join(vmConfigDir, v.Name+".json"))
-	// confirmationMessage := "\nThe following files will be deleted:\n\n"
-	// for _, msg := range files {
-	// 	confirmationMessage += msg + "\n"
-	// }
+	vmDataDir, err := machine.GetDataDir(vmtype)
+	if err != nil {
+		return "", nil, err
+	}
+	files = append(files, filepath.Join(vmDataDir, "wsldist", v.Name))
 
-	// // Get path to socket and pidFile before we do any cleanups
-	// qemuSocketFile, pidFile, errSocketFile := v.getSocketandPid()
-	// //silently try to delete socket and pid file
-	// //remove socket and pid file if any: warn at low priority if things fail
-	// if errSocketFile == nil {
-	// 	// Remove the pidfile
-	// 	if err := os.Remove(pidFile); err != nil && !errors.Is(err, os.ErrNotExist) {
-	// 		logrus.Debugf("Error while removing pidfile: %v", err)
-	// 	}
-	// 	// Remove socket
-	// 	if err := os.Remove(qemuSocketFile); err != nil && !errors.Is(err, os.ErrNotExist) {
-	// 		logrus.Debugf("Error while removing podman-machine-socket: %v", err)
-	// 	}
-	// }
+	confirmationMessage := "\nThe following files will be deleted:\n\n"
+	for _, msg := range files {
+		confirmationMessage += msg + "\n"
+	}
 
-	// confirmationMessage += "\n"
-	// return confirmationMessage, func() error {
-	// 	for _, f := range files {
-	// 		if err := os.Remove(f); err != nil {
-	// 			logrus.Error(err)
-	// 		}
-	// 	}
-	// 	return nil
-	// }, nil
-
-	return "", nil, nil
+	confirmationMessage += "\n"
+	return confirmationMessage, func() error {
+		if err := machine.RemoveConnection(v.Name); err != nil {
+			logrus.Error(err)
+		}
+		if err := machine.RemoveConnection(v.Name + "-root"); err != nil {
+			logrus.Error(err)
+		}
+		if err := runCmdPassThrough("wsl", "--unregister", toDist(v.Name)); err != nil {
+			logrus.Error(err)
+		}
+		for _, f := range files {
+			if err := os.Remove(f); err != nil {
+				logrus.Error(err)
+			}
+		}
+		return nil
+	}, nil
 }
 
 func (v *MachineVM) isRunning() bool {
@@ -882,7 +881,7 @@ func GetVMInfos() ([]*machine.ListResponse, error) {
 			listEntry.VMType = "wsl"
 			// listEntry.CPUs = vm.CPUs
 			// listEntry.Memory = vm.Memory
-			// listEntry.DiskSize = vm.DiskSize
+			listEntry.DiskSize = getDiskSize(vm)
 			fi, err := os.Stat(fullPath)
 			if err != nil {
 				return err
@@ -905,6 +904,20 @@ func GetVMInfos() ([]*machine.ListResponse, error) {
 		return nil, err
 	}
 	return listed, err
+}
+
+func getDiskSize(vm *MachineVM) uint64 {
+	vmDataDir, err := machine.GetDataDir(vmtype)
+	if err != nil {
+		return 0
+	}
+	distDir := filepath.Join(vmDataDir, "wsldist")
+	disk := filepath.Join(distDir, vm.Name, "ext4.vhdx")
+	info, err := os.Stat(disk)
+	if err != nil {
+		return 0
+	}
+	return uint64(info.Size())
 }
 
 func IsValidVMName(name string) (bool, error) {

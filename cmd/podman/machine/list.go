@@ -189,8 +189,8 @@ func toMachineFormat(vms []*machine.ListResponse) ([]*machineReporter, error) {
 		response.Stream = streamName(vm.Stream)
 		response.VMType = vm.VMType
 		response.CPUs = vm.CPUs
-		response.Memory = strUint(vm.Memory * units.MiB)
-		response.DiskSize = strUint(vm.DiskSize * units.GiB)
+		response.Memory = strUint(vm.Memory)
+		response.DiskSize = strUint(vm.DiskSize)
 
 		machineResponses = append(machineResponses, response)
 	}
@@ -221,8 +221,8 @@ func toHumanFormat(vms []*machine.ListResponse) ([]*machineReporter, error) {
 		response.Created = units.HumanDuration(time.Since(vm.CreatedAt)) + " ago"
 		response.VMType = vm.VMType
 		response.CPUs = vm.CPUs
-		response.Memory = units.HumanSize(float64(vm.Memory) * units.MiB)
-		response.DiskSize = units.HumanSize(float64(vm.DiskSize) * units.GiB)
+		response.Memory = units.HumanSize(float64(vm.Memory))
+		response.DiskSize = units.HumanSize(float64(vm.DiskSize))
 
 		humanResponses = append(humanResponses, response)
 	}

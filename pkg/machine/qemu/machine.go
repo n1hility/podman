@@ -1,3 +1,4 @@
+//go:build amd64 || arm64
 // +build amd64 arm64
 
 package qemu
@@ -21,6 +22,7 @@ import (
 	"github.com/containers/podman/v3/utils"
 	"github.com/containers/storage/pkg/homedir"
 	"github.com/digitalocean/go-qemu/qmp"
+	"github.com/docker/go-units"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -600,8 +602,8 @@ func GetVMInfos() ([]*machine.ListResponse, error) {
 			listEntry.Stream = vm.ImageStream
 			listEntry.VMType = "qemu"
 			listEntry.CPUs = vm.CPUs
-			listEntry.Memory = vm.Memory
-			listEntry.DiskSize = vm.DiskSize
+			listEntry.Memory = vm.Memory * units.MiB
+			listEntry.DiskSize = vm.DiskSize * units.GiB
 			fi, err := os.Stat(fullPath)
 			if err != nil {
 				return err

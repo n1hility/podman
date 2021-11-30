@@ -272,6 +272,7 @@ func reboot() error {
 		"After rebooting, please wait a minute or two for podman machine to relaunch and continue installing."
 
 	if MessageBox(message, "Podman Machine", false) != 1 {
+		fmt.Println("Reboot is required to continue installation, please reboot at your convenience")
 		os.Exit(ERROR_SUCCESS_REBOOT_REQUIRED)
 		return nil
 	}
@@ -322,7 +323,7 @@ func obtainShutdownPrivilege() error {
 }
 
 func addRunOnceRegistryEntry(command string) error {
-	k, err := registry.OpenKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\RunOnce`, registry.WRITE)
+	k, _, err := registry.CreateKey(registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\RunOnce`, registry.WRITE)
 	if err != nil {
 		return errors.Wrap(err, "Could not open RunOnce registry entry")
 	}

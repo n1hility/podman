@@ -1,3 +1,4 @@
+//go:build amd64 || arm64
 // +build amd64 arm64
 
 package machine
@@ -11,6 +12,7 @@ import (
 	"github.com/containers/podman/v3/cmd/podman/registry"
 	"github.com/containers/podman/v3/pkg/machine"
 	"github.com/containers/podman/v3/pkg/machine/qemu"
+	"github.com/containers/podman/v3/pkg/machine/wsl"
 	"github.com/spf13/cobra"
 )
 
@@ -60,7 +62,10 @@ func rm(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 && len(args[0]) > 0 {
 		vmName = args[0]
 	}
+	vmType = getSystemDefaultVmType()
 	switch vmType {
+	case "wsl":
+		vm, err = wsl.LoadVMByName(vmName)
 	default:
 		vm, err = qemu.LoadVMByName(vmName)
 	}
