@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/containers/podman/v3/pkg/machine"
 	"github.com/containers/podman/v3/utils"
@@ -26,7 +27,7 @@ import (
 var (
 	// vmtype refers to qemu (vs libvirt, krun, etc)
 	vmtype               = "wsl"
-	defaultRemoteUser    = "core"
+	defaultRemoteUser    = "user"
 	defaultFedoraRelease = "34"
 )
 
@@ -51,9 +52,12 @@ rm -f /etc/systemd/system/multi-user.target.wants/systemd-resolved.service
 rm -f /etc/systemd/system/dbus-org.freedesktop.resolve1.service
 ln -fs /dev/null /etc/systemd/system/console-getty.service
 mkdir -p /etc/systemd/system/systemd-sysusers.service.d/
-adduser -m core
-mkdir -p /home/core/.config/systemd/user/
-chown core:core /home/core/.config
+adduser -m user -G wheel
+mkdir -p /home/user/.config/systemd/user/
+chown user:user /home/user/.config
+`
+
+const sudoers = `%wheel        ALL=(ALL)       NOPASSWD: ALL
 `
 
 const bootstrap = `#!/bin/bash
@@ -63,29 +67,29 @@ sleep 0.1
 `
 
 const wslmotd = `
-This distro hosts the podman guest os instance. System services run within a
-nested namespace. To access (e.g. via systemctl) first run the following 
-command:
+You will be automatically entered into a nested process namespace where 
+systemd is running. If you need to access the root namespace, hit ctrl-d 
+or type exit. This also means to log out you need to exit twice.
 
-/root/enterns
 `
 
 const sysdpid = "SYSDPID=`ps -eo cmd,pid | grep -m 1 ^/lib/systemd/systemd | awk '{print $2}'`"
 
 const profile = sysdpid + `
-if [ "$SYSDPID" != "1" ] && [ -f /etc/wslmotd ]; then
-	cat /etc/wslmotd
+if [ ! -z "$SYSDPID" ] && [ "$SYSDPID" != "1" ]; then
+    cat /etc/wslmotd
+	/usr/local/bin/podman-enterns
 fi
 `
 
 const enterns = "#!/bin/bash\n" + sysdpid + `
-if [ "$SYSDPID" != "1" ]; then
+if [ ! -z "$SYSDPID" ] && [ "$SYSDPID" != "1" ]; then
 	nsenter -m -p -t $SYSDPID "$@"
 fi
 `
 
 const waitTerm = sysdpid + `
-if [ "$SYSDPID" != "" ]; then
+if [ ! -z "$SYSDPID" ]; then
 	timeout 60 tail -f /dev/null --pid $SYSDPID
 fi
 `
@@ -103,9 +107,9 @@ Wants=network-online.target podman.socket
 ExecStart=/usr/bin/sleep infinity
 `
 
-const lingerSetup = `mkdir -p /home/core/.config/systemd/user/default.target.wants
-ln -fs /home/core/.config/systemd/user/linger-example.service \
-       /home/core/.config/systemd/user/default.target.wants/linger-example.service
+const lingerSetup = `mkdir -p /home/user/.config/systemd/user/default.target.wants
+ln -fs /home/user/.config/systemd/user/linger-example.service \
+       /home/user/.config/systemd/user/default.target.wants/linger-example.service
 `
 
 const wslInstallError = `Could not %s. See previous output for any potential failure details. 
@@ -232,7 +236,6 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 		}
 	default:
 		if _, e := os.Stat(opts.ImagePath); e == nil {
-			fmt.Println("Stat success = " + opts.ImagePath)
 			v.ImageStream = "custom"
 			dd, err = machine.NewGenericDownloader(vmtype, v.Name, opts.ImagePath)
 		} else if _, e := strconv.Atoi(opts.ImagePath); e == nil {
@@ -277,7 +280,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	}
 
 	dist := toDist(v.Name)
-	fmt.Println("Importing operating system into WSL (this may take several minutes)...")
+	fmt.Println("Importing operating system into WSL (this may take 5+ minutes on a new WSL install)...")
 	err = runCmdPassThrough("wsl", "--import", dist, distTarget, v.ImagePath)
 	if err != nil {
 		return false, errors.Wrap(err, "WSL import of guest OS failed")
@@ -320,6 +323,11 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 		return false, errors.Wrap(err, "Could not configure systemd settomgs for guest OS")
 	}
 
+	err = pipeCmdPassThrough("wsl", sudoers, "-d", dist, "sh", "-c", "cat >> /etc/sudoers")
+	if err != nil {
+		return false, errors.Wrap(err, "Could not add wheel to sudoers")
+	}
+
 	err = pipeCmdPassThrough("wsl", overrideSysusers, "-d", dist, "sh", "-c",
 		"cat > /etc/systemd/system/systemd-sysusers.service.d/override.conf")
 	if err != nil {
@@ -327,7 +335,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	}
 
 	err = pipeCmdPassThrough("wsl", lingerService, "-d", dist, "sh", "-c",
-		"cat > /home/core/.config/systemd/user/linger-example.service")
+		"cat > /home/user/.config/systemd/user/linger-example.service")
 	if err != nil {
 		return false, errors.Wrap(err, "Could not generate linger service for guest OS")
 	}
@@ -342,12 +350,12 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 		return false, errors.Wrap(err, "Could not create containers.conf for guest OS")
 	}
 
-	err = pipeCmdPassThrough("wsl", enterns, "-d", dist, "sh", "-c", "cat > /root/enterns; chmod 755 /root/enterns")
+	err = pipeCmdPassThrough("wsl", enterns, "-d", dist, "sh", "-c", "cat > /usr/local/bin/podman-enterns; chmod 755 /usr/local/bin/podman-enterns")
 	if err != nil {
 		return false, errors.Wrap(err, "Could not create enterns script for guest OS")
 	}
 
-	err = pipeCmdPassThrough("wsl", profile, "-d", dist, "sh", "-c", "cat > /etc/profile.d/wslmotd.sh")
+	err = pipeCmdPassThrough("wsl", profile, "-d", dist, "sh", "-c", "cat > /etc/profile.d/enterns.sh")
 	if err != nil {
 		return false, errors.Wrap(err, "Could not create motd profile script for guest OS")
 	}
@@ -369,9 +377,9 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	}
 
 	err = pipeCmdPassThrough("wsl", key+"\n", "-d", dist, "sh", "-c",
-		"mkdir -p /home/core/.ssh; cat >> /home/core/.ssh/authorized_keys; chown -R core:core /home/core/.ssh; chmod 600 /home/core/.ssh/authorized_keys")
+		"mkdir -p /home/user/.ssh; cat >> /home/user/.ssh/authorized_keys; chown -R user:user /home/user/.ssh; chmod 600 /home/user/.ssh/authorized_keys")
 	if err != nil {
-		return false, errors.Wrap(err, "Could not create core authorized keys on guest OS")
+		return false, errors.Wrap(err, "Could not create 'user' authorized keys on guest OS")
 	}
 
 	return true, nil
@@ -625,17 +633,14 @@ func (v *MachineVM) Start(name string, _ machine.StartOptions) error {
 
 	fmt.Println("Starting machine...")
 
-	dist := name
-	if !strings.HasPrefix(dist, "podman") {
-		dist = "podman-" + dist
-	}
+	dist := toDist(name)
 
 	err := runCmdPassThrough("wsl", "-d", dist, "/root/bootstrap")
 	if err != nil {
 		return errors.Wrap(err, "WSL bootstrap script failed")
 	}
 
-	return err
+	return markStart(name)
 }
 
 func isWSLInstalled() bool {
@@ -677,7 +682,7 @@ func isWSLRunning(dist string) (bool, error) {
 }
 
 func isSystemdRunning(dist string) (bool, error) {
-	cmd := exec.Command("wsl", "-d", dist)
+	cmd := exec.Command("wsl", "-d", dist, "sh")
 	cmd.Stdin = strings.NewReader(sysdpid + "\necho $SYSDPID\n")
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -722,13 +727,13 @@ func (v *MachineVM) Stop(name string, _ machine.StopOptions) error {
 		return errors.Errorf("%q is not running", v.Name)
 	}
 
-	cmd := exec.Command("wsl", "-d", dist)
+	cmd := exec.Command("wsl", "-d", dist, "sh")
 	cmd.Stdin = strings.NewReader(waitTerm)
 	if err = cmd.Start(); err != nil {
 		return errors.Wrap(err, "Error executing wait command")
 	}
 
-	exitCmd := exec.Command("wsl", "-d", dist, "/root/enterns", "systemctl", "exit", "0")
+	exitCmd := exec.Command("wsl", "-d", dist, "/usr/local/bin/podman-enterns", "systemctl", "exit", "0")
 	if err = exitCmd.Run(); err != nil {
 		return errors.Wrap(err, "Error stopping sysd")
 	}
@@ -790,7 +795,7 @@ func (v *MachineVM) Remove(name string, opts machine.RemoveOptions) (string, fun
 			logrus.Error(err)
 		}
 		for _, f := range files {
-			if err := os.Remove(f); err != nil {
+			if err := os.RemoveAll(f); err != nil {
 				logrus.Error(err)
 			}
 		}
@@ -809,6 +814,7 @@ func (v *MachineVM) isRunning() bool {
 	sysd := false
 	if wsl {
 		sysd, err = isSystemdRunning(dist)
+
 		if err != nil {
 			return false
 		}
@@ -820,9 +826,9 @@ func (v *MachineVM) isRunning() bool {
 // SSH opens an interactive SSH session to the vm specified.
 // Added ssh function to VM interface: pkg/machine/config/go : line 58
 func (v *MachineVM) SSH(name string, opts machine.SSHOptions) error {
-	// if !v.isRunning() {
-	// 	return errors.Errorf("vm %q is not running.", v.Name)
-	// }
+	if !v.isRunning() {
+		return errors.Errorf("vm %q is not running.", v.Name)
+	}
 
 	username := opts.Username
 	if username == "" {
@@ -879,20 +885,15 @@ func GetVMInfos() ([]*machine.ListResponse, error) {
 			listEntry.Name = vm.Name
 			listEntry.Stream = vm.ImageStream
 			listEntry.VMType = "wsl"
-			// listEntry.CPUs = vm.CPUs
-			// listEntry.Memory = vm.Memory
+			listEntry.CPUs, _ = getCPUs(vm)
+			listEntry.Memory, _ = getMem(vm)
 			listEntry.DiskSize = getDiskSize(vm)
 			fi, err := os.Stat(fullPath)
 			if err != nil {
 				return err
 			}
 			listEntry.CreatedAt = fi.ModTime()
-
-			fi, err = os.Stat(vm.ImagePath)
-			if err != nil {
-				return err
-			}
-			listEntry.LastUp = fi.ModTime()
+			listEntry.LastUp = getLastStart(vm, fi.ModTime())
 			if vm.isRunning() {
 				listEntry.Running = true
 			}
@@ -918,6 +919,96 @@ func getDiskSize(vm *MachineVM) uint64 {
 		return 0
 	}
 	return uint64(info.Size())
+}
+
+func markStart(name string) error {
+	vmDataDir, err := machine.GetDataDir(vmtype)
+	if err != nil {
+		return err
+	}
+	distDir := filepath.Join(vmDataDir, "wsldist")
+	start := filepath.Join(distDir, name, "laststart")
+	file, err := os.Create(start)
+	if err != nil {
+		return err
+	}
+	file.Close()
+
+	return nil
+}
+
+func getLastStart(vm *MachineVM, created time.Time) time.Time {
+	vmDataDir, err := machine.GetDataDir(vmtype)
+	if err != nil {
+		return created
+	}
+	distDir := filepath.Join(vmDataDir, "wsldist")
+	start := filepath.Join(distDir, vm.Name, "laststart")
+	info, err := os.Stat(start)
+	if err != nil {
+		return created
+	}
+	return info.ModTime()
+}
+
+func getCPUs(vm *MachineVM) (uint64, error) {
+	dist := toDist(vm.Name)
+	if run, _ := isWSLRunning(dist); !run {
+		return 0, nil
+	}
+	cmd := exec.Command("wsl", "-d", dist, "nproc")
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return 0, err
+	}
+	if err = cmd.Start(); err != nil {
+		return 0, err
+	}
+	scanner := bufio.NewScanner(out)
+	var result string
+	for scanner.Scan() {
+		result = scanner.Text()
+	}
+	_ = cmd.Wait()
+
+	ret, err := strconv.Atoi(result)
+	return uint64(ret), err
+}
+
+func getMem(vm *MachineVM) (uint64, error) {
+	dist := toDist(vm.Name)
+	if run, _ := isWSLRunning(dist); !run {
+		return 0, nil
+	}
+	cmd := exec.Command("wsl", "-d", dist, "cat", "/proc/meminfo")
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return 0, err
+	}
+	if err = cmd.Start(); err != nil {
+		return 0, err
+	}
+	scanner := bufio.NewScanner(out)
+	var (
+		total, available uint64
+		t, a             int
+	)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if strings.HasPrefix(fields[0], "MemTotal") && len(fields) >= 2 {
+			t, err = strconv.Atoi(fields[1])
+			total = uint64(t) * 1024
+		} else if strings.HasPrefix(fields[0], "MemAvailable") && len(fields) >= 2 {
+			a, err = strconv.Atoi(fields[1])
+			available = uint64(a) * 1024
+		}
+		if err != nil {
+			break
+		}
+	}
+	_ = cmd.Wait()
+
+	return total - available, err
 }
 
 func IsValidVMName(name string) (bool, error) {
