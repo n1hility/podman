@@ -224,7 +224,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 		return false, err
 	}
 
-	err = writeJson(v)
+	err = writeJSON(v)
 	if err != nil {
 		return false, err
 	}
