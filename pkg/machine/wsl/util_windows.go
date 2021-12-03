@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"syscall"
 	"unicode/utf16"
@@ -20,6 +19,7 @@ import (
 	"github.com/containers/podman/v3/pkg/machine"
 )
 
+//nolint
 type SHELLEXECUTEINFO struct {
 	cbSize         uint32
 	fMask          uint32
@@ -38,6 +38,7 @@ type SHELLEXECUTEINFO struct {
 	hProcess       syscall.Handle
 }
 
+//nolint
 type Luid struct {
 	lowPart  uint32
 	highPart int32
@@ -53,6 +54,7 @@ type TokenPrivileges struct {
 	privileges     [1]LuidAndAttributes
 }
 
+//nolint // Cleaner to refer to the official OS constant names, and consistent with syscall
 const (
 	SEE_MASK_NOCLOSEPROCESS         = 0x40
 	EWX_FORCEIFHUNG                 = 0x10
@@ -182,31 +184,10 @@ func wrapMaybe(err error, message string) error {
 
 func wrapMaybef(err error, format string, args ...interface{}) error {
 	if err != nil {
-		return errors.Wrapf(err, format, args)
+		return errors.Wrapf(err, format, args...)
 	}
 
-	return errors.Errorf(format, args)
-}
-
-func getCommandLine() string {
-	cmd := unsafe.Pointer(syscall.GetCommandLine())
-	size := unsafe.Sizeof(uint16(0))
-
-	len := 0
-	for p := cmd; *(*uint16)(unsafe.Pointer(p)) != 0; p = unsafe.Pointer(uintptr(p) + size) {
-		len++
-	}
-
-	var runes []uint16
-	assignSlice(unsafe.Pointer(&runes), cmd, len)
-	return string(utf16.Decode(runes))
-}
-
-func assignSlice(slice unsafe.Pointer, data unsafe.Pointer, len int) {
-	header := (*reflect.SliceHeader)(slice)
-	header.Data = uintptr(data)
-	header.Cap = len
-	header.Len = len
+	return errors.Errorf(format, args...)
 }
 
 func reboot() error {
@@ -262,7 +243,7 @@ func reboot() error {
 
 	if MessageBox(message, "Podman Machine", false) != 1 {
 		fmt.Println("Reboot is required to continue installation, please reboot at your convenience")
-		os.Exit(ERROR_SUCCESS_REBOOT_REQUIRED)
+		os.Exit(ErrorSuccessRebootRequired)
 		return nil
 	}
 
