@@ -71,7 +71,7 @@ func init() {
 }
 
 func list(cmd *cobra.Command, args []string) error {
-	vmType := getSystemDefaultVmType()
+	vmType := getSystemDefaultVMType()
 	var (
 		opts         machine.ListOptions
 		listResponse []*machine.ListResponse

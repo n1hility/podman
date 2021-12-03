@@ -89,7 +89,7 @@ func init() {
 	_ = initCmd.RegisterFlagCompletionFunc(IgnitionPathFlagName, completion.AutocompleteDefault)
 }
 
-func getSystemDefaultVmType() string {
+func getSystemDefaultVMType() string {
 	if runtime.GOOS == "windows" {
 		return "wsl"
 	}
@@ -105,7 +105,7 @@ func initMachine(cmd *cobra.Command, args []string) error {
 		err    error
 	)
 
-	vmType = getSystemDefaultVmType()
+	vmType = getSystemDefaultVMType()
 	initOpts.Name = defaultMachineName
 	if len(args) > 0 {
 		initOpts.Name = args[0]

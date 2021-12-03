@@ -43,7 +43,7 @@ func stop(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 && len(args[0]) > 0 {
 		vmName = args[0]
 	}
-	vmType = getSystemDefaultVmType()
+	vmType = getSystemDefaultVMType()
 	switch vmType {
 	case "wsl":
 		vm, err = wsl.LoadVMByName(vmName)

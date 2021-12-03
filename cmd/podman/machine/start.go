@@ -44,15 +44,15 @@ func start(cmd *cobra.Command, args []string) error {
 		vmName = args[0]
 	}
 
-	vmType = getSystemDefaultVmType()
+	vmType = getSystemDefaultVMType()
 
 	switch vmType {
 	case "wsl":
 		vm, err = wsl.LoadVMByName(vmName)
 	default:
-		active, activeName, err := qemu.CheckActiveVM()
-		if err != nil {
-			return err
+		active, activeName, cerr := qemu.CheckActiveVM()
+		if cerr != nil {
+			return cerr
 		}
 		if active {
 			if vmName == activeName {

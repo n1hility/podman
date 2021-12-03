@@ -32,8 +32,8 @@ var (
 )
 
 const (
-	ERROR_SUCCESS_REBOOT_INITIATED = 1641
-	ERROR_SUCCESS_REBOOT_REQUIRED  = 3010
+	ErrorSuccessRebootInitiated = 1641
+	ErrorSuccessRebootRequired  = 3010
 )
 
 const containersConf = `[containers]
@@ -525,7 +525,7 @@ func launchElevate(operation string) error {
 	err := relaunchElevatedWait()
 	if err != nil {
 		if eerr, ok := err.(*ExitCodeError); ok {
-			if eerr.code == ERROR_SUCCESS_REBOOT_REQUIRED {
+			if eerr.code == ErrorSuccessRebootRequired {
 				fmt.Println("Reboot is required to continue installation, please reboot at your convenience")
 				return nil
 			}
@@ -597,7 +597,6 @@ func dumpOutputFile() {
 
 func getElevatedOutputFileRead() (*os.File, error) {
 	return getElevatedOutputFile(os.O_RDONLY)
-
 }
 
 func getElevatedOutputFileWrite() (*os.File, error) {
@@ -653,9 +652,9 @@ func isMsiError(err error) bool {
 		switch eerr.ExitCode() {
 		case 0:
 			fallthrough
-		case ERROR_SUCCESS_REBOOT_INITIATED:
+		case ErrorSuccessRebootInitiated:
 			fallthrough
-		case ERROR_SUCCESS_REBOOT_REQUIRED:
+		case ErrorSuccessRebootRequired:
 			return false
 		}
 	}
