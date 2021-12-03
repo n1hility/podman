@@ -11,10 +11,6 @@ func reboot() error {
 	return nil
 }
 
-func relaunchElevated() error {
-	return nil
-}
-
 func relaunchElevatedWait() error {
 	return nil
 }

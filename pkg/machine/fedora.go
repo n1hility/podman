@@ -26,7 +26,7 @@ type FedoraDownload struct {
 }
 
 func NewFedoraDownloader(vmType, vmName, releaseStream string) (DistributionDownload, error) {
-	imageName, downloadUrl, size, err := getFedoraDownload(releaseStream)
+	imageName, downloadURL, size, err := getFedoraDownload(releaseStream)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func NewFedoraDownloader(vmType, vmName, releaseStream string) (DistributionDown
 			Format:    Format,
 			ImageName: imageName,
 			LocalPath: filepath.Join(dataDir, imageName),
-			URL:       downloadUrl,
+			URL:       downloadURL,
 			VMName:    vmName,
 			Size:      size,
 		},
@@ -56,13 +56,13 @@ func (f FedoraDownload) Get() *Download {
 	return &f.Download
 }
 
-func (d FedoraDownload) UpdateAvailable() (bool, error) {
-	info, err := os.Stat(d.LocalPath)
+func (f FedoraDownload) UpdateAvailable() (bool, error) {
+	info, err := os.Stat(f.LocalPath)
 	if err != nil {
 		return false, nil
 	}
 
-	return info.Size() == d.Size, nil
+	return info.Size() == f.Size, nil
 }
 
 func truncRead(url string) ([]byte, error) {
@@ -93,8 +93,8 @@ func getFedoraDownload(releaseStream string) (string, *url.URL, int64, error) {
 		release = releaseStream
 	}
 
-	dirUrl := githubURL + "tree/" + release + "/" + getFcosArch() + "/"
-	body, err := truncRead(dirUrl)
+	dirURL := githubURL + "tree/" + release + "/" + getFcosArch() + "/"
+	body, err := truncRead(dirURL)
 	if err != nil {
 		return "", nil, -1, err
 	}
@@ -105,24 +105,25 @@ func getFedoraDownload(releaseStream string) (string, *url.URL, int64, error) {
 	}
 	file := rx.FindString(string(body))
 	if len(file) <= 0 {
-		return "", nil, -1, fmt.Errorf("Could not locate Fedora download at %s", dirUrl)
+		return "", nil, -1, fmt.Errorf("could not locate Fedora download at %s", dirURL)
 	}
 
-	rawUrl := githubURL + "raw/" + release + "/" + getFcosArch() + "/"
-	newLocation := rawUrl + file
-	downloadUrl, err := url.Parse(newLocation)
+	rawURL := githubURL + "raw/" + release + "/" + getFcosArch() + "/"
+	newLocation := rawURL + file
+	downloadURL, err := url.Parse(newLocation)
 	if err != nil {
-		return "", nil, -1, errors.Wrapf(err, "Invalid URL generated from discovered Fedora file: %s", newLocation)
+		return "", nil, -1, errors.Wrapf(err, "invalid URL generated from discovered Fedora file: %s", newLocation)
 	}
 
 	resp, err := http.Head(newLocation)
 	if err != nil {
-		return "", nil, -1, errors.Wrapf(err, "Head request failed: %s", newLocation)
+		return "", nil, -1, errors.Wrapf(err, "head request failed: %s", newLocation)
 	}
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, -1, fmt.Errorf("Head request failed [%d] on download: %s", resp.StatusCode, newLocation)
+		return "", nil, -1, fmt.Errorf("head request failed [%d] on download: %s", resp.StatusCode, newLocation)
 	}
 
-	return file, downloadUrl, resp.ContentLength, nil
+	return file, downloadURL, resp.ContentLength, nil
 }

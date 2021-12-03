@@ -33,7 +33,7 @@ var (
 
 const (
 	ERROR_SUCCESS_REBOOT_INITIATED = 1641
-	ERROR_SUCCESS_REBOOT_REQUIRED = 3010
+	ERROR_SUCCESS_REBOOT_REQUIRED  = 3010
 )
 
 const containersConf = `[containers]
@@ -124,14 +124,14 @@ http://docs.microsoft.com/en-us/windows/wsl/install
 
 const wslInstallKernel = "install the WSL Kernel"
 
-const wslOldVersion = 
-`Automatic installation of WSL can not be performed on this version of Windows
+const wslOldVersion = `Automatic installation of WSL can not be performed on this version of Windows
 Either update to Build 19041 (or later), or perform the manual installation steps
 outlined in the following article:
 
 http://docs.microsoft.com/en-us/windows/wsl/install\
 
 `
+
 type MachineVM struct {
 	// IdentityPath is the fq path to the ssh priv key
 	IdentityPath string
@@ -230,15 +230,15 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	}
 
 	err = setupConnections(v, opts, sshDir)
-	if (err != nil) {
+	if err != nil {
 		return false, err
 	}
-	
+
 	dist, err := provisionWSLDist(v)
-	if (err != nil) {
+	if err != nil {
 		return false, err
 	}
-	
+
 	fmt.Println("Configuring system...")
 	err = configureSystem(v, dist)
 	if err != nil {
@@ -251,7 +251,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	}
 
 	err = createKeys(v, dist, sshDir)
-	if (err != nil) {
+	if err != nil {
 		return false, err
 	}
 
@@ -260,7 +260,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 
 func downloadDistro(v *MachineVM, opts machine.InitOptions) error {
 	var (
-		dd machine.DistributionDownload
+		dd  machine.DistributionDownload
 		err error
 	)
 	switch opts.ImagePath {
@@ -291,7 +291,7 @@ func downloadDistro(v *MachineVM, opts machine.InitOptions) error {
 	return machine.DownloadImage(dd)
 }
 
-func writeJson(v *MachineVM) error {
+func writeJSON(v *MachineVM) error {
 	vmConfigDir, err := machine.GetConfDir(vmtype)
 	if err != nil {
 		return err
@@ -324,7 +324,7 @@ func setupConnections(v *MachineVM, opts machine.InitOptions, sshDir string) err
 	return nil
 }
 
-func provisionWSLDist(v *MachineVM) (string, error)  {
+func provisionWSLDist(v *MachineVM) (string, error) {
 	vmDataDir, err := machine.GetDataDir(vmtype)
 	if err != nil {
 		return "", err
@@ -379,7 +379,7 @@ func createKeys(v *MachineVM, dist string, sshDir string) error {
 	}
 
 	err = pipeCmdPassThrough("wsl", key+"\n", "-d", dist, "sh", "-c",
-	"mkdir -p /root/.ssh; cat >> /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys")
+		"mkdir -p /root/.ssh; cat >> /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys")
 	if err != nil {
 		return errors.Wrap(err, "Could not create root authorized keys on guest OS")
 	}
@@ -456,7 +456,7 @@ func installScripts(dist string) error {
 	}
 
 	return nil
-} 
+}
 
 func checkAndInstallWSL(opts machine.InitOptions) (bool, error) {
 	if !isWSLInstalled() {

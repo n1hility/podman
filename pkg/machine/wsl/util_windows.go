@@ -118,17 +118,6 @@ func hasAdminRights() bool {
 	return member || token.IsElevated()
 }
 
-func relaunchElevated() error {
-	e, _ := os.Executable()
-	d, _ := os.Getwd()
-	exe, _ := syscall.UTF16PtrFromString(e)
-	cwd, _ := syscall.UTF16PtrFromString(d)
-	arg, _ := syscall.UTF16PtrFromString(buildCommandArgs(true))
-	verb, _ := syscall.UTF16PtrFromString("runas")
-
-	return windows.ShellExecute(0, verb, exe, arg, cwd, 1)
-}
-
 func relaunchElevatedWait() error {
 	e, _ := os.Executable()
 	d, _ := os.Getwd()
