@@ -19,7 +19,6 @@ import (
 	_ "github.com/containers/podman/v3/cmd/podman/secrets"
 	_ "github.com/containers/podman/v3/cmd/podman/system"
 	_ "github.com/containers/podman/v3/cmd/podman/system/connection"
-	_ "github.com/containers/podman/v3/cmd/podman/system/winpath"
 	_ "github.com/containers/podman/v3/cmd/podman/volumes"
 	"github.com/containers/podman/v3/pkg/rootless"
 	"github.com/containers/podman/v3/pkg/terminal"
