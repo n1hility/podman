@@ -3,6 +3,7 @@ windows_task:
   script:
     - ps: | 
         wsl --status 
+        choco feature enable -n allowGlobalConfirmation
         choco install make
         choco install golang
         make podman-remote-windows
