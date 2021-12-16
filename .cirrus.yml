@@ -1,6 +1,7 @@
 windows_task:
   name: WSL Output
-  script: | 
+  script: 
+    - ps: | 
         $status = wsl --status
         Write-Host $status
         wsl -l
