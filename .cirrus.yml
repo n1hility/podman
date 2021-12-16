@@ -1,7 +1,6 @@
 windows_task:
   name: WSL Output
-  script:
-    - ps: | 
+  script: | 
         wsl --status
         wsl -l
   compute_engine_instance:
@@ -28,7 +27,10 @@ windows_task:
           -ldflags '-X github.com/containers/podman/v3/libpod/define.gitCommit=5852cee4c517f303ed5122ea28cd9b1dad6e04c2 -X github.com/containers/podman/v3/libpod/define.buildInfo=1639692734 -X github.com/containers/podman/v3/libpod/config._installPrefix=/usr/local -X github.com/containers/podman/v3/libpod/config._etcDir=/usr/local/etc ' `
           -tags "remote exclude_graphdriver_btrfs btrfs_noversion exclude_graphdriver_devicemapper containers_image_openpgp" `
           -o bin\windows\podman.exe .\cmd\podman 
-        .\bin\windows\podman machine init
+        cd bin
+        cd windows
+        dir
+        .\podman machine init
   compute_engine_instance:
     image_project: jtgreene-podman # GCP project
     image: family/windows-podman # family or a full image name.
