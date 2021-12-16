@@ -2,7 +2,7 @@
 windows_task:
   script:
     - ps: 
-        - wsl --status
+        - wsl --status 
         - choco install make
         - choco install golang
         - make podman-remote-windows
