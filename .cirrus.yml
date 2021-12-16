@@ -3,8 +3,8 @@ windows_task:
   script: 
     - ps: |
         $ProgressPreference = 'SilentlyContinue'
-        & wsl --status
-        & wsl -l
+        & wsl --status 2>&1
+        & wsl -l 2>&1
   compute_engine_instance:
     image_project: jtgreene-podman # GCP project
     image: family/windows-podman # family or a full image name.
