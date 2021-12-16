@@ -1,7 +1,7 @@
 
 windows_task:
   script:
-    - ps: Get-Location  
+    - ps: wsl --status 
   compute_engine_instance:
     image_project: windows-cloud # GCP project
     image: family/windows-20h2-core # family or a full image name.
