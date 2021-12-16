@@ -107,7 +107,11 @@ func DownloadImage(d DistributionDownload) error {
 // DownloadVMImage downloads a VM image from url to given path
 // with download status
 func DownloadVMImage(downloadURL *url2.URL, localImagePath string) error {
-	out, err := os.Create(localImagePath)
+	return DownloadFile(downloadURL, localImagePath, "VM image")
+}
+
+func DownloadFile(downloadURL *url2.URL, localPath string, kind string) error {
+	out, err := os.Create(localPath)
 	if err != nil {
 		return err
 	}
@@ -128,11 +132,11 @@ func DownloadVMImage(downloadURL *url2.URL, localImagePath string) error {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("error downloading VM image %s: %s", downloadURL, resp.Status)
+		return fmt.Errorf("error downloading %s %s: %s", kind, downloadURL, resp.Status)
 	}
 	size := resp.ContentLength
 	urlSplit := strings.Split(downloadURL.Path, "/")
-	prefix := "Downloading VM image: " + urlSplit[len(urlSplit)-1]
+	prefix := "Downloading " + kind + ": " + urlSplit[len(urlSplit)-1]
 	onComplete := prefix + ": done"
 
 	p := mpb.New(

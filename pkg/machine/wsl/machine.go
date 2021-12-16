@@ -215,7 +215,7 @@ func (p *Provider) LoadVMByName(name string) (machine.VM, error) {
 // Init writes the json configuration file to the filesystem for
 // other verbs (start, stop)
 func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
-	if cont, err := checkAndInstallWSL(opts); !cont {
+	if cont, err := checkAndInstallWSL(v, opts); !cont {
 		appendOutputIfError(opts.ReExec, err)
 		return cont, err
 	}
@@ -276,6 +276,19 @@ func downloadDistro(v *MachineVM, opts machine.InitOptions) error {
 
 	v.ImagePath = dd.Get().LocalUncompressedFile
 	return machine.DownloadImage(dd)
+}
+
+func downloadKernel(v *MachineVM, opts machine.InitOptions) (string, error) {
+	vmDataDir, err := machine.GetDataDir(vmtype)
+	if err != nil {
+		return "", err
+	}
+	file := filepath.Join(vmDataDir, filepath.Base(kernelArchURL.Path))
+	if err := machine.DownloadFile(kernelArchURL, file, "kernel"); err != nil {
+		return "", err
+	}
+
+	return file, nil
 }
 
 func writeJSON(v *MachineVM) error {
@@ -442,7 +455,7 @@ func installScripts(dist string) error {
 	return nil
 }
 
-func checkAndInstallWSL(opts machine.InitOptions) (bool, error) {
+func checkAndInstallWSL(v *MachineVM, opts machine.InitOptions) (bool, error) {
 	if isWSLInstalled() {
 		return true, nil
 	}
@@ -450,7 +463,7 @@ func checkAndInstallWSL(opts machine.InitOptions) (bool, error) {
 	admin := hasAdminRights()
 
 	if !isWSLFeatureEnabled() {
-		return false, attemptFeatureInstall(opts, admin)
+		return false, attemptFeatureInstall(v, opts, admin)
 	}
 
 	skip := false
@@ -477,7 +490,7 @@ func checkAndInstallWSL(opts machine.InitOptions) (bool, error) {
 	return true, nil
 }
 
-func attemptFeatureInstall(opts machine.InitOptions, admin bool) error {
+func attemptFeatureInstall(v *MachineVM, opts machine.InitOptions, admin bool) error {
 	if !winVersionAtLeast(10, 0, 18362) {
 		return errors.Errorf("Your version of Windows does not support WSL. Update to Windows 10 Build 19041 or later")
 	} else if !winVersionAtLeast(10, 0, 19041) {
@@ -503,7 +516,7 @@ func attemptFeatureInstall(opts machine.InitOptions, admin bool) error {
 		return launchElevate("install the Windows WSL Features")
 	}
 
-	return installWsl()
+	return installWsl(v, opts)
 }
 
 func launchElevate(operation string) error {
@@ -524,7 +537,7 @@ func launchElevate(operation string) error {
 	return err
 }
 
-func installWsl() error {
+func installWsl(v *MachineVM, opts machine.InitOptions) error {
 	log, err := getElevatedOutputFileWrite()
 	if err != nil {
 		return err
@@ -539,9 +552,26 @@ func installWsl() error {
 		"/featurename:VirtualMachinePlatform", "/all", "/norestart"); isMsiError(err) {
 		return errors.Wrap(err, "could not enable Virtual Machine Feature")
 	}
+	preloadKernel(log, v, opts)
 	log.Close()
 
 	return reboot()
+}
+
+func preloadKernel(log *os.File, v *MachineVM, opts machine.InitOptions) {
+	fmt.Println("Preloading Kernel...")
+	file, err := downloadKernel(v, opts)
+	if err != nil {
+		fmt.Printf("Deferring kernel install due to download error: %s\n", err.Error())
+		return
+	}
+	fmt.Println("Installing Kernel...")
+	if err := runCmdPassThroughTee(log, "msiexec", "/passive", "/i", file, "WSL_INSTALLING=1"); isMsiError(err) {
+		fmt.Printf("Deferring kernel install due to error: %s\n", err.Error())
+		return
+	}
+
+	fmt.Println("Kernel install sucessful.")
 }
 
 func installWslKernel() error {
