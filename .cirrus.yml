@@ -3,8 +3,8 @@ windows_task:
   script:
     - ps: Get-Location  
   compute_engine_instance:
-    image_project: cirrus-images # GCP project
-    image: cirrusci/windowsservercore:2019 # family or a full image name.
+    image_project: windows-cloud # GCP project
+    image: windows-2019 # family or a full image name.
     platform: windows
     cpu: 4 # optional. Defaults to 2 CPUs.
     memory: 16G # optional. Defaults to 4G.
