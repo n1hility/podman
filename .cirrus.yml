@@ -1,11 +1,11 @@
 
 windows_task:
   script:
-    - ps: 
-        - wsl --status 
-        - choco install make
-        - choco install golang
-        - make podman-remote-windows
+    - ps: | 
+        wsl --status 
+        choco install make
+        choco install golang
+        make podman-remote-windows
   compute_engine_instance:
     image_project: jtgreene-podman # GCP project
     image: family/windows-podman # family or a full image name.
