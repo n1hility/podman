@@ -4,4 +4,3 @@ windows_container:
  windows_task:
   script:
     - ps: Get-Location
-    
