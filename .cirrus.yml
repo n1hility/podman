@@ -33,8 +33,8 @@ windows_task:
           -tags "remote exclude_graphdriver_btrfs btrfs_noversion exclude_graphdriver_devicemapper containers_image_openpgp" `
           -o bin\windows\podman.exe .\cmd\podman 
         Write-Output 'Made it here.'
-        dir | Write-Output
-        & .\podman.exe machine init
+        dir bin\windows | Write-Output
+        & .\podman.exe machine init | Write-Output
   compute_engine_instance:
     image_project: jtgreene-podman # GCP project
     image: family/windows-podman # family or a full image name.
