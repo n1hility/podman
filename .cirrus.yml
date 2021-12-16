@@ -3,7 +3,8 @@ windows_task:
   script: 
     - ps: |
         $ProgressPreference = 'SilentlyContinue'
-        wsl --status | Write-Host
+        wsl --status | Write-Output
+        Write-Output Done
   compute_engine_instance:
     image_project: jtgreene-podman # GCP project
     image: family/windows-podman # family or a full image name.
@@ -33,7 +34,7 @@ windows_task:
         Write-Output 'Made it here.'
         cd bin
         cd windows
-        dir | Write-Host
+        dir | Write-Output
         & .\podman.exe machine init
   compute_engine_instance:
     image_project: jtgreene-podman # GCP project
