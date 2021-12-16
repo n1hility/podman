@@ -3,9 +3,7 @@ windows_task:
   script: 
     - ps: |
         $ProgressPreference = 'SilentlyContinue'
-        $output = wsl --status
-        Write-Output $output
-        & wsl -l 2>&1
+        wsl --status | Write-Host
   compute_engine_instance:
     image_project: jtgreene-podman # GCP project
     image: family/windows-podman # family or a full image name.
