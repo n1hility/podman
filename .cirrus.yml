@@ -24,8 +24,9 @@ windows_task:
         choco feature enable -n allowGlobalConfirmation
         choco install make
         choco install golang
-        refreshenv
+        refreshenv 
         mkdir bin\windows
+        $env:CGO_ENABLED = 0
         go build `
           -mod=vendor  `
           -ldflags '-X github.com/containers/podman/v3/libpod/define.gitCommit=5852cee4c517f303ed5122ea28cd9b1dad6e04c2 -X github.com/containers/podman/v3/libpod/define.buildInfo=1639692734 -X github.com/containers/podman/v3/libpod/config._installPrefix=/usr/local -X github.com/containers/podman/v3/libpod/config._etcDir=/usr/local/etc ' `
