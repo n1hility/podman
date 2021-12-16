@@ -4,7 +4,7 @@ windows_task:
     - ps: Get-Location  
   compute_engine_instance:
     image_project: windows-cloud # GCP project
-    image: windows-20h2-core # family or a full image name.
+    image: family/windows-20h2-core # family or a full image name.
     platform: windows
     cpu: 4 # optional. Defaults to 2 CPUs.
     memory: 16G # optional. Defaults to 4G.
