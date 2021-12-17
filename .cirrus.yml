@@ -21,20 +21,22 @@ windows_task:
         wsl --status
         wsl -l
         choco feature enable -n allowGlobalConfirmation
-        choco install golang
-        refreshenv 
+        choco install golang 
   build_script:
+    - refreshenv
     - ps: | 
-        mkdir bin\windows
-        $env:CGO_ENABLED = 0
-        go build `
-          -mod=vendor  `
-          -ldflags '-X github.com/containers/podman/v3/libpod/define.gitCommit=5852cee4c517f303ed5122ea28cd9b1dad6e04c2 -X github.com/containers/podman/v3/libpod/define.buildInfo=1639692734 -X github.com/containers/podman/v3/libpod/config._installPrefix=/usr/local -X github.com/containers/podman/v3/libpod/config._etcDir=/usr/local/etc ' `
-          -tags "remote exclude_graphdriver_btrfs btrfs_noversion exclude_graphdriver_devicemapper containers_image_openpgp" `
-          -o bin\windows\podman.exe .\cmd\podman 
-        Write-Output 'Made it here.'
-        dir bin\windows | Write-Output
-        & .\podman.exe machine init | Write-Output
+        try {
+          mkdir bin\windows
+          $env:CGO_ENABLED = 0
+          go build `
+            -mod=vendor  `
+            -ldflags '-X github.com/containers/podman/v3/libpod/define.gitCommit=5852cee4c517f303ed5122ea28cd9b1dad6e04c2 -X github.com/containers/podman/v3/libpod/define.buildInfo=1639692734 -X github.com/containers/podman/v3/libpod/config._installPrefix=/usr/local -X github.com/containers/podman/v3/libpod/config._etcDir=/usr/local/etc ' `
+            -tags "remote exclude_graphdriver_btrfs btrfs_noversion exclude_graphdriver_devicemapper containers_image_openpgp" `
+            -o bin\windows\podman.exe .\cmd\podman 
+          Write-Output 'Made it here.'
+          dir bin\windows 
+          & .\podman.exe machine init 
+        } catch ($_)
   compute_engine_instance:
     image_project: jtgreene-podman # GCP project
     image: family/windows-podman # family or a full image name.
