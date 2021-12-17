@@ -36,7 +36,7 @@ windows_task:
           Write-Output 'Made it here.'
           dir bin\windows 
           & .\podman.exe machine init 
-        } catch ($_)
+        } catch {$_}
   compute_engine_instance:
     image_project: jtgreene-podman # GCP project
     image: family/windows-podman # family or a full image name.
