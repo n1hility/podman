@@ -35,7 +35,7 @@ windows_task:
             -o bin\windows\podman.exe .\cmd\podman 
           Write-Output 'Made it here.'
           dir bin\windows 
-          & bin\windows\podman.exe machine init 
+          bin\windows\podman.exe system connection list 
         } catch {$_; exit 1}
   compute_engine_instance:
     image_project: jtgreene-podman # GCP project
