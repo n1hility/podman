@@ -26,7 +26,7 @@ var (
 
 var (
 	initOpts           = machine.InitOptions{}
-	defaultMachineName = "podman-machine-default"
+	defaultMachineName = machine.DefaultMachineName
 	now                bool
 )
 
@@ -99,6 +99,10 @@ func init() {
 	IgnitionPathFlagName := "ignition-path"
 	flags.StringVar(&initOpts.IgnitionPath, IgnitionPathFlagName, "", "Path to ignition file")
 	_ = initCmd.RegisterFlagCompletionFunc(IgnitionPathFlagName, completion.AutocompleteDefault)
+
+	rootfulFlagName := "root"
+	flags.BoolVar(&initOpts.Rootful, rootfulFlagName, false, "Whether this machine should prefer rootful container exectution")
+	_ = initCmd.RegisterFlagCompletionFunc(rootfulFlagName, completion.AutocompleteDefault)
 }
 
 // TODO should we allow for a users to append to the qemu cmdline?
