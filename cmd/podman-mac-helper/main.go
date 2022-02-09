@@ -4,73 +4,32 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
-	"text/template"
-	"time"
 
 	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
 )
 
 const (
-	dockerSock = "/var/run/docker.sock"
-	fail       = "NO"
-	success    = "OK"
+	defaultPrefix = "/usr/local"
+	dockerSock    = "/var/run/docker.sock"
 )
 
-const launchConfig = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>Label</key>
-	<string>com.github.containers.podman.helper-{{.User}}</string>
-	<key>ProgramArguments</key>
-	<array>
-		<string>{{.Program}}</string>
-		<string>service</string>
-		<string>{{.Target}}</string>
-	</array>
-	<key>inetdCompatibility</key>
-	<dict>
-		<key>Wait</key>
-		<false/>
-	</dict>
-	<key>UserName</key>
-	<string>root</string>
-	<key>Sockets</key>
-	<dict>
-		<key>Listeners</key>
-		<dict>
-			<key>SockFamily</key>
-			<string>Unix</string>
-			<key>SockPathName</key>
-			<string>/private/var/run/podman-helper-{{.User}}.socket</string>
-			<key>SockPathOwner</key>
-			<integer>{{.UID}}</integer>
-			<key>SockPathMode</key>
-			<!-- SockPathMode takes base 10 (384 = 0600) -->
-			<integer>384</integer>
-			<key>SockType</key>
-			<string>stream</string>
-		</dict>
-	</dict>
-</dict>
-</plist>
-`
+var installPrefix string
 
-type launchParams struct {
-	Program string
-	User    string
-	UID     string
-	Target  string
+var rootCmd = &cobra.Command{
+	Use:               "podman-mac-helper",
+	Short:             "A system helper to manage docker.sock",
+	Long:              `podman-mac-helper is a system helper service and tool for managing docker.sock `,
+	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
+	SilenceErrors:     true,
 }
 
 // Note, this code is security sensitive since it runs under privilege.
@@ -88,49 +47,14 @@ type launchParams struct {
 // unix file permissions
 
 func main() {
-	usageFmt := "Usage: %s [install | uninstall | service]\n"
-	prog, err := getProgram()
-	if err != nil {
-		prog = "unknown"
-	}
-
-	if len(os.Args) < 2 {
-		fmt.Printf(usageFmt, filepath.Base(prog))
-		os.Exit(1)
-	}
-
 	if os.Geteuid() != 0 {
-		fmt.Printf("Must be ran as root via sudo or osascript. Run the following:\nsudo %s %s\n", prog, os.Args[1])
+		fmt.Printf("This command must be ran as root via sudo or osascript\n")
 		os.Exit(1)
 	}
 
-	switch os.Args[1] {
-	case "install":
-		err = install()
-	case "uninstall":
-		err = uninstall()
-	case "service":
-		os.Exit(service())
-	default:
-		fmt.Println(usageFmt, filepath.Base(prog))
-	}
-
-	if err != nil {
+	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
-		os.Exit(2)
 	}
-
-	os.Exit(0)
-}
-
-func getProgram() (string, error) {
-	exec, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-
-	exec, err = filepath.EvalSymlinks(exec)
-	return exec, err
 }
 
 func getUserInfo(name string) (string, string, string, error) {
@@ -179,121 +103,6 @@ func getUser() (string, string, string, error) {
 	return name, uid, home, nil
 }
 
-func install() error {
-	// TODO - We need to either copy or ensure the referenced binary has a path
-	//        fully owned by root
-	prog, err := getProgram()
-	if err != nil {
-		return err
-	}
-
-	userName, uid, homeDir, err := getUser()
-	if err != nil {
-		return err
-	}
-
-	target := filepath.Join(homeDir, ".local", "share", "containers", "podman", "machine", "podman.sock")
-
-	var buf bytes.Buffer
-	t := template.Must(template.New("launchdConfig").Parse(launchConfig))
-	err = t.Execute(&buf, launchParams{prog, userName, uid, target})
-	if err != nil {
-		return err
-	}
-
-	labelName := fmt.Sprintf("com.github.containers.podman.helper-%s.plist", userName)
-	fileName := filepath.Join("/Library", "LaunchDaemons", labelName)
-	file, err := os.OpenFile(fileName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
-	if err != nil {
-		if os.IsExist(err) {
-			return errors.New("helper is already installed, uninstall first")
-		}
-		return errors.Wrap(err, "error creating helper plist file")
-	}
-	defer file.Close()
-	_, err = buf.WriteTo(file)
-	if err != nil {
-		return err
-	}
-
-	if err = runDetectErr("launchctl", "load", fileName); err != nil {
-		return errors.Wrap(err, "launchctl failed loading service")
-	}
-
-	return nil
-}
-
-func uninstall() error {
-	userName, _, _, err := getUser()
-	if err != nil {
-		return err
-	}
-
-	labelName := fmt.Sprintf("com.github.containers.podman.helper-%s", userName)
-	fileName := filepath.Join("/Library", "LaunchDaemons", labelName+".plist")
-
-	if err = runDetectErr("launchctl", "unload", fileName); err != nil {
-		// Try removing the service by label in case the service is half uninstalled
-		if rerr := runDetectErr("launchctl", "remove", labelName); rerr != nil {
-			// Exit code 3 = no service to remove
-			if exitErr, ok := rerr.(*exec.ExitError); !ok || exitErr.ExitCode() != 3 {
-				fmt.Fprintf(os.Stderr, "Warning: service unloading failed: %s\n", err.Error())
-				fmt.Fprintf(os.Stderr, "Warning: remove also failed: %s\n", rerr.Error())
-			}
-		}
-	}
-
-	if err := os.Remove(fileName); err != nil {
-		if !os.IsNotExist(err) {
-			return errors.Errorf("could not remove plist file: %s", fileName)
-		}
-	}
-
-	return nil
-}
-
-func service() int {
-	defer os.Stdout.Close()
-	defer os.Stdin.Close()
-	defer os.Stderr.Close()
-	if len(os.Args) < 3 {
-		fmt.Print(fail)
-		return 1
-	}
-	target := os.Args[2]
-
-	request := make(chan bool)
-	go func() {
-		buf := make([]byte, 3)
-		_, err := io.ReadFull(os.Stdin, buf)
-		request <- err == nil && string(buf) == "GO\n"
-	}()
-
-	valid := false
-	select {
-	case valid = <-request:
-	case <-time.After(5 * time.Second):
-	}
-
-	if !valid {
-		fmt.Println(fail)
-		return 2
-	}
-
-	err := os.Remove(dockerSock)
-	if err == nil || os.IsNotExist(err) {
-		err = os.Symlink(target, dockerSock)
-	}
-
-	if err != nil {
-		fmt.Print(fail)
-		return 3
-	}
-
-	fmt.Print(success)
-	return 0
-}
-
 // Used for commands that don't return a proper exit code
 func runDetectErr(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
@@ -328,4 +137,13 @@ func readCapped(reader io.Reader) string {
 	}
 
 	return ""
+}
+
+func addPrefixFlag(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&installPrefix, "prefix", defaultPrefix, "Sets the install location prefix")
+}
+
+func silentUsage(cmd *cobra.Command, args []string) {
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
 }
