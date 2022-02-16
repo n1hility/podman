@@ -34,7 +34,6 @@ func init() {
 
 	rootfulFlagName := "root"
 	flags.BoolVar(&setOpts.Rootful, rootfulFlagName, false, "Whether this machine should prefer rootful container execution")
-	_ = initCmd.RegisterFlagCompletionFunc(rootfulFlagName, completion.AutocompleteDefault)
 }
 
 func setMachine(cmd *cobra.Command, args []string) error {

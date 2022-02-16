@@ -104,7 +104,6 @@ func init() {
 	flags = initCmd.LocalFlags()
 	rootfulFlagName := "root"
 	flags.BoolVar(&initOpts.Rootful, rootfulFlagName, false, "Whether this machine should prefer rootful container exectution")
-	_ = initCmd.RegisterFlagCompletionFunc(rootfulFlagName, completion.AutocompleteDefault)
 }
 
 // TODO should we allow for a users to append to the qemu cmdline?
