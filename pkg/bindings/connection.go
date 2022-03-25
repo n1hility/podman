@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"strconv"
@@ -357,6 +358,11 @@ func (c *Connection) DoRequest(ctx context.Context, httpBody io.Reader, httpMeth
 		for _, v := range val {
 			req.Header.Add(key, v)
 		}
+	}
+
+	if logrus.IsLevelEnabled(logrus.DebugLevel) {
+		b, _ := httputil.DumpRequest(req, true)
+		logrus.Debug(string(b))
 	}
 
 	// Give the Do three chances in the case of a comm/service hiccup

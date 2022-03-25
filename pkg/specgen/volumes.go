@@ -65,7 +65,7 @@ func GenVolumeMounts(volumeFlag []string) (map[string]spec.Mount, map[string]*Na
 			err     error
 		)
 
-		splitVol := strings.Split(vol, ":")
+		splitVol, dirSource := adjustVolumeSplit(strings.Split(vol, ":"))
 		if len(splitVol) > 3 {
 			return nil, nil, nil, errors.Wrapf(volumeFormatErr, vol)
 		}
@@ -93,7 +93,7 @@ func GenVolumeMounts(volumeFlag []string) (map[string]spec.Mount, map[string]*Na
 			}
 		}
 
-		if strings.HasPrefix(src, "/") || strings.HasPrefix(src, ".") {
+		if strings.HasPrefix(src, "/") || strings.HasPrefix(src, ".") || dirSource {
 			// This is not a named volume
 			overlayFlag := false
 			chownFlag := false

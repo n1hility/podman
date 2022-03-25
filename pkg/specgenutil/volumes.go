@@ -122,7 +122,8 @@ func parseVolumes(volumeFlag, mountFlag, tmpfsFlag []string, addReadOnlyTmpfs bo
 	finalMounts := make([]spec.Mount, 0, len(unifiedMounts))
 	for _, mount := range unifiedMounts {
 		if mount.Type == define.TypeBind {
-			absSrc, err := filepath.Abs(mount.Source)
+			fmt.Println("Abs = " + mount.Source)
+			absSrc, err := convertMountPath(mount.Source)
 			if err != nil {
 				return nil, nil, nil, nil, errors.Wrapf(err, "error getting absolute path of %s", mount.Source)
 			}
