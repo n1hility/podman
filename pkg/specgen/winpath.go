@@ -1,0 +1,64 @@
+package specgen
+
+import (
+	"fmt"
+	"os"
+	"strings"
+	"unicode"
+
+	"github.com/pkg/errors"
+)
+
+func isHostWinPath(path string) bool {
+	return strings.HasPrefix(path, `\\`) || hasWinDriveScheme(path, 0) || winPathExists(path)
+}
+
+func hasWinDriveScheme(path string, start int) bool {
+	if len(path) < start + 1 || path[start + 1] != ':' {
+		return false
+	}
+
+	drive := rune(path[start])
+	return drive < unicode.MaxASCII && unicode.IsLetter(drive)
+}
+
+// Converts a Windows path to a WSL guest path if local env is a WSL linux guest or this is a Windows client. 
+func ConvertWinMountPath(path string) (string, error) {
+	if !shouldResolveWinPaths() {
+		return path, nil
+	}
+
+	if strings.HasPrefix(path, "/") {
+		// Handle /[driveletter]/windows/path form (e.g. c:\Users\bar == /c/Users/bar)
+		if len(path) > 2 && path[2] == '/' && shouldResolveUnixWinVariant(path) {
+			drive := unicode.ToLower(rune(path[1])) 
+			if unicode.IsLetter(drive) && drive <= unicode.MaxASCII {
+				winPath := fmt.Sprintf("%c:%s", drive,  strings.ReplaceAll(path[2:], "/", `\`))
+				if _, err := os.Stat(winPath); err == nil {
+					return fmt.Sprintf("/mnt/%c/%s", drive, path[3:]), nil
+				}
+			}
+		} 
+
+		// unix path - pass through 
+		return path, nil
+	}
+
+	// Convert remote win client relative paths to absolute
+	path = resolveRelativeOnWindows(path)
+
+	// Strip extended marker prefix if present
+	if strings.HasPrefix(path, `\\?\`) {
+		path = path[4:]
+	}
+
+	if strings.HasPrefix(path, `\\.\`) {
+		path = "/mnt/wsl/" + path[4:]
+	} else if path[1] == ':' {
+		path = "/mnt/" + strings.ToLower(path[0:1]) + path[2:]		
+	} else {
+		return path, errors.New("unsupported UNC path")
+	}
+
+	return strings.ReplaceAll(path, `\`, "/"), nil
+}

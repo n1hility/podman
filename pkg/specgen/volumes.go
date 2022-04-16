@@ -2,7 +2,6 @@ package specgen
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/containers/common/pkg/parse"
 	spec "github.com/opencontainers/runtime-spec/specs-go"
@@ -66,7 +65,7 @@ func GenVolumeMounts(volumeFlag []string) (map[string]spec.Mount, map[string]*Na
 			err     error
 		)
 
-		splitVol := splitVolumeString(vol)
+		splitVol := SplitVolumeString(vol)
 		if len(splitVol) > 3 {
 			return nil, nil, nil, errors.Wrapf(volumeFormatErr, vol)
 		}
@@ -156,8 +155,11 @@ func GenVolumeMounts(volumeFlag []string) (map[string]spec.Mount, map[string]*Na
 
 // Splits a volume string, accounting for Win drive paths 
 // when running as a WSL linux guest or Windows client
-func splitVolumeString(vol  string) []string {
+func SplitVolumeString(vol  string) []string {
 	parts := strings.Split(vol, ":")
+	if !shouldResolveWinPaths() {
+		return parts
+	}
 
 	// Skip extended marker prefix if present
 	n := 0
@@ -172,17 +174,4 @@ func splitVolumeString(vol  string) []string {
 	}
 
 	return parts
-}
-
-func isHostWinPath(path string) bool {
-	return strings.HasPrefix(path, `\\`) || hasWinDriveScheme(path, 0) || winPathExists(path)
-}
-
-func hasWinDriveScheme(path string, start int) bool {
-	if len(path) < start + 1 || path[start + 1] != ':' {
-		return false
-	}
-
-	drive := rune(path[start])
-	return drive < unicode.MaxASCII && unicode.IsLetter(drive)
 }

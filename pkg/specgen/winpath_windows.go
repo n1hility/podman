@@ -1,9 +1,18 @@
-package specgenutil
+package specgen
 
 import (
+	"os"
 	"path/filepath"
 	"github.com/sirupsen/logrus"
 )
+
+func shouldResolveUnixWinVariant(path string) bool {
+	return true
+}
+
+func shouldResolveWinPaths() bool {
+	return true
+}
 
 func resolveRelativeOnWindows(path string) string {
 	ret, err := filepath.Abs(path)
@@ -15,6 +24,7 @@ func resolveRelativeOnWindows(path string) string {
 	return ret
 }
 
-func shouldResolveUnixWinVariant(path string) bool {
-	return true
+func winPathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
