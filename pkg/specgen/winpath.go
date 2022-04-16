@@ -2,7 +2,6 @@ package specgen
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"unicode"
 
@@ -36,11 +35,8 @@ func ConvertWinMountPath(path string) (string, error) {
 		if len(path) > 2 && path[2] == '/' && shouldResolveUnixWinVariant(path) {
 			drive := unicode.ToLower(rune(path[1]))
 			if unicode.IsLetter(drive) && drive <= unicode.MaxASCII {
-				winPath := fmt.Sprintf("%c:%s", drive, strings.ReplaceAll(path[2:], "/", `\`))
-				if _, err := os.Stat(winPath); err == nil {
 					fmt.Println("Return")
 					return fmt.Sprintf("/mnt/%c/%s", drive, path[3:]), nil
-				}
 			}
 		}
 
