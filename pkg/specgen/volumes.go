@@ -169,7 +169,7 @@ func SplitVolumeString(vol  string) []string {
 
 	if hasWinDriveScheme(vol, n) {
 		first := parts[0] + ":" + parts[1]
-		parts := parts[1:]
+		parts = parts[1:]
 		parts[0] = first
 	}
 
