@@ -2,6 +2,7 @@ package specgen
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/containers/common/pkg/parse"
 	spec "github.com/opencontainers/runtime-spec/specs-go"
@@ -65,7 +66,7 @@ func GenVolumeMounts(volumeFlag []string) (map[string]spec.Mount, map[string]*Na
 			err     error
 		)
 
-		splitVol, dirSource := adjustVolumeSplit(strings.Split(vol, ":"))
+		splitVol := splitVolumeString(vol)
 		if len(splitVol) > 3 {
 			return nil, nil, nil, errors.Wrapf(volumeFormatErr, vol)
 		}
@@ -93,7 +94,7 @@ func GenVolumeMounts(volumeFlag []string) (map[string]spec.Mount, map[string]*Na
 			}
 		}
 
-		if strings.HasPrefix(src, "/") || strings.HasPrefix(src, ".") || dirSource {
+		if strings.HasPrefix(src, "/") || strings.HasPrefix(src, ".") || isHostWinPath(src) {
 			// This is not a named volume
 			overlayFlag := false
 			chownFlag := false
@@ -151,4 +152,37 @@ func GenVolumeMounts(volumeFlag []string) (map[string]spec.Mount, map[string]*Na
 	}
 
 	return mounts, volumes, overlayVolumes, nil
+}
+
+// Splits a volume string, accounting for Win drive paths 
+// when running as a WSL linux guest or Windows client
+func splitVolumeString(vol  string) []string {
+	parts := strings.Split(vol, ":")
+
+	// Skip extended marker prefix if present
+	n := 0
+	if strings.HasPrefix(vol, `\\?\`) {
+		n = 4
+	}
+
+	if hasWinDriveScheme(vol, n) {
+		first := parts[0] + ":" + parts[1]
+		parts := parts[1:]
+		parts[0] = first
+	}
+
+	return parts
+}
+
+func isHostWinPath(path string) bool {
+	return strings.HasPrefix(path, `\\`) || hasWinDriveScheme(path, 0) || winPathExists(path)
+}
+
+func hasWinDriveScheme(path string, start int) bool {
+	if len(path) < start + 1 || path[start + 1] != ':' {
+		return false
+	}
+
+	drive := rune(path[start])
+	return drive < unicode.MaxASCII && unicode.IsLetter(drive)
 }
