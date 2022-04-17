@@ -320,6 +320,7 @@ func getBindMount(args []string) (spec.Mount, error) {
 			newMount.Source = kv[1]
 			setSource = true
 		case "target", "dst", "destination":
+			fmt.Println("KV1 = " + kv[1])
 			if len(kv) == 1 {
 				return newMount, errors.Wrapf(optionArgError, kv[0])
 			}
@@ -327,6 +328,7 @@ func getBindMount(args []string) (spec.Mount, error) {
 				return newMount, err
 			}
 			newMount.Destination = filepath.Clean(kv[1])
+			fmt.Println("Dest =" +  newMount.Destination)
 			setDest = true
 		case "relabel":
 			if setRelabel {

@@ -24,18 +24,14 @@ func hasWinDriveScheme(path string, start int) bool {
 // Converts a Windows path to a WSL guest path if local env is a WSL linux guest or this is a Windows client.
 func ConvertWinMountPath(path string) (string, error) {
 	if !shouldResolveWinPaths() {
-		fmt.Println("Nope!")
 		return path, nil
 	}
-
-	fmt.Println("Yep!")
 
 	if strings.HasPrefix(path, "/") {
 		// Handle /[driveletter]/windows/path form (e.g. c:\Users\bar == /c/Users/bar)
 		if len(path) > 2 && path[2] == '/' && shouldResolveUnixWinVariant(path) {
 			drive := unicode.ToLower(rune(path[1]))
 			if unicode.IsLetter(drive) && drive <= unicode.MaxASCII {
-					fmt.Println("Return")
 					return fmt.Sprintf("/mnt/%c/%s", drive, path[3:]), nil
 			}
 		}
@@ -51,7 +47,7 @@ func ConvertWinMountPath(path string) (string, error) {
 	if strings.HasPrefix(path, `\\?\`) {
 		path = path[4:]
 	}
-
+	// Drive installed via wsl --mount
 	if strings.HasPrefix(path, `\\.\`) {
 		path = "/mnt/wsl/" + path[4:]
 	} else if path[1] == ':' {
