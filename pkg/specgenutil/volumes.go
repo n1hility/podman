@@ -122,7 +122,6 @@ func parseVolumes(volumeFlag, mountFlag, tmpfsFlag []string, addReadOnlyTmpfs bo
 	finalMounts := make([]spec.Mount, 0, len(unifiedMounts))
 	for _, mount := range unifiedMounts {
 		if mount.Type == define.TypeBind {
-			fmt.Println("Abs = " + mount.Source)
 			absSrc, err := specgen.ConvertWinMountPath(mount.Source)
 			if err != nil {
 				return nil, nil, nil, nil, errors.Wrapf(err, "error getting absolute path of %s", mount.Source)
@@ -320,7 +319,6 @@ func getBindMount(args []string) (spec.Mount, error) {
 			newMount.Source = kv[1]
 			setSource = true
 		case "target", "dst", "destination":
-			fmt.Println("KV1 = " + kv[1])
 			if len(kv) == 1 {
 				return newMount, errors.Wrapf(optionArgError, kv[0])
 			}
@@ -328,7 +326,6 @@ func getBindMount(args []string) (spec.Mount, error) {
 				return newMount, err
 			}
 			newMount.Destination = unixPathClean(kv[1])
-			fmt.Println("Dest =" +  newMount.Destination)
 			setDest = true
 		case "relabel":
 			if setRelabel {
@@ -695,7 +692,8 @@ func validChownFlag(flag string) (bool, error) {
 	return true, nil
 }
 
-// On Unix systems this is a no-op, but on Windows, ensures the path retains unix seprators  
+// On Unix systems this is a no-op, but on Windows, ensures the path retains unix seprators
+// (since filepath.Clean converts Unix segments to filepath.Separator)
 func unixPathClean(path string) string {
 	return filepath.ToSlash(filepath.Clean(path))
 }
