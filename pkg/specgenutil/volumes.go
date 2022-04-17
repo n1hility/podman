@@ -327,7 +327,7 @@ func getBindMount(args []string) (spec.Mount, error) {
 			if err := parse.ValidateVolumeCtrDir(kv[1]); err != nil {
 				return newMount, err
 			}
-			newMount.Destination = filepath.Clean(kv[1])
+			newMount.Destination = unixPathClean(kv[1])
 			fmt.Println("Dest =" +  newMount.Destination)
 			setDest = true
 		case "relabel":
@@ -450,7 +450,7 @@ func getTmpfsMount(args []string) (spec.Mount, error) {
 			if err := parse.ValidateVolumeCtrDir(kv[1]); err != nil {
 				return newMount, err
 			}
-			newMount.Destination = filepath.Clean(kv[1])
+			newMount.Destination = unixPathClean(kv[1])
 			setDest = true
 		case "U", "chown":
 			if setOwnership {
@@ -501,7 +501,7 @@ func getDevptsMount(args []string) (spec.Mount, error) {
 			if err := parse.ValidateVolumeCtrDir(kv[1]); err != nil {
 				return newMount, err
 			}
-			newMount.Destination = filepath.Clean(kv[1])
+			newMount.Destination = unixPathClean(kv[1])
 			setDest = true
 		default:
 			return newMount, errors.Wrapf(util.ErrBadMntOption, "%s", kv[0])
@@ -566,7 +566,7 @@ func getNamedVolume(args []string) (*specgen.NamedVolume, error) {
 			if err := parse.ValidateVolumeCtrDir(kv[1]); err != nil {
 				return nil, err
 			}
-			newVolume.Dest = filepath.Clean(kv[1])
+			newVolume.Dest = unixPathClean(kv[1])
 			setDest = true
 		case "U", "chown":
 			if setOwnership {
@@ -618,7 +618,7 @@ func getImageVolume(args []string) (*specgen.ImageVolume, error) {
 			if err := parse.ValidateVolumeCtrDir(kv[1]); err != nil {
 				return nil, err
 			}
-			newVolume.Destination = filepath.Clean(kv[1])
+			newVolume.Destination = unixPathClean(kv[1])
 		case "rw", "readwrite":
 			switch kv[1] {
 			case "true":
@@ -664,7 +664,7 @@ func getTmpfsMounts(tmpfsFlag []string) (map[string]spec.Mount, error) {
 		}
 
 		mount := spec.Mount{
-			Destination: filepath.Clean(destPath),
+			Destination: unixPathClean(destPath),
 			Type:        define.TypeTmpfs,
 			Options:     options,
 			Source:      define.TypeTmpfs,
@@ -693,5 +693,10 @@ func validChownFlag(flag string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// On Unix systems this is a no-op, but on Windows, ensures the path retains unix seprators  
+func unixPathClean(path string) string {
+	return filepath.ToSlash(filepath.Clean(path))
 }
 
