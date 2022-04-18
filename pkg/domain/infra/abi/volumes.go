@@ -2,6 +2,7 @@ package abi
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/containers/podman/v4/libpod"
 	"github.com/containers/podman/v4/libpod/define"
@@ -26,6 +27,7 @@ func (ic *ContainerEngine) VolumeCreate(ctx context.Context, opts entities.Volum
 		volumeOptions = append(volumeOptions, libpod.WithVolumeLabels(opts.Label))
 	}
 	if len(opts.Options) > 0 {
+		fmt.Println("Calling parse")
 		parsedOptions, err := parse.VolumeOptions(opts.Options)
 		if err != nil {
 			return nil, err
