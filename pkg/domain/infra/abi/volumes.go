@@ -2,7 +2,6 @@ package abi
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/containers/podman/v4/libpod"
 	"github.com/containers/podman/v4/libpod/define"
