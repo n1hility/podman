@@ -19,6 +19,8 @@ func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) 
 	libpodOptions := []libpod.VolumeCreateOption{}
 	volumeOptions := make(map[string]string)
 
+	fmt.Printf("opts = %v\n", opts)
+
 	for key, value := range opts {
 		fmt.Println("Key = " + key + " Val = " + value)
 		switch key {
