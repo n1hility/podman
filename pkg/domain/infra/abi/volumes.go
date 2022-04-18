@@ -27,7 +27,6 @@ func (ic *ContainerEngine) VolumeCreate(ctx context.Context, opts entities.Volum
 		volumeOptions = append(volumeOptions, libpod.WithVolumeLabels(opts.Label))
 	}
 	if len(opts.Options) > 0 {
-		fmt.Println("Calling parse")
 		parsedOptions, err := parse.VolumeOptions(opts.Options)
 		if err != nil {
 			return nil, err
