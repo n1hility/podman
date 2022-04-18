@@ -79,19 +79,7 @@ func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) 
 					finalVal = append(finalVal, o)
 					// set option "GID": "$gid"
 					volumeOptions["GID"] = splitO[1]
-				case "device":
-					if len(splitO) == 2 {
-						fmt.Println("device detected")
-						newpath, err := specgen.ConvertWinMountPath(splitO[1])
-						fmt.Println("newpath =" + newpath)
-						if err != nil {
-							return nil, err
-						}
-						if newpath != splitO[1] {
-							o = "device=" + newpath
-						}
-					}
-					fallthrough
+			
 				default:
 					finalVal = append(finalVal, o)
 				}
@@ -99,6 +87,17 @@ func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) 
 			if len(finalVal) > 0 {
 				volumeOptions[key] = strings.Join(finalVal, ",")
 			}
+		case "device":
+			fmt.Println("device detected")
+			newpath, err := specgen.ConvertWinMountPath(value)
+			fmt.Println("newpath =" + newpath)
+			if err != nil {
+				return nil, err
+			}
+			if newpath != value {
+				value = "device=" + newpath
+			}
+			fallthrough
 		default:
 			volumeOptions[key] = value
 		}
