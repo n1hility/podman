@@ -6,6 +6,7 @@ import (
 
 	"github.com/containers/podman/v4/libpod"
 	"github.com/containers/podman/v4/libpod/define"
+	"github.com/containers/podman/v4/pkg/specgen"
 	units "github.com/docker/go-units"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -73,6 +74,17 @@ func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) 
 					finalVal = append(finalVal, o)
 					// set option "GID": "$gid"
 					volumeOptions["GID"] = splitO[1]
+				case "device":
+					if len(splitO) == 2 {
+						newpath, err := specgen.ConvertWinMountPath(splitO[1])
+						if err != nil {
+							return nil, err
+						}
+						if newpath != splitO[1] {
+							o = "device=" + newpath
+						}
+					}
+					fallthrough
 				default:
 					finalVal = append(finalVal, o)
 				}
