@@ -20,6 +20,7 @@ func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) 
 	volumeOptions := make(map[string]string)
 
 	for key, value := range opts {
+		fmt.Println("Key = " + key + " Val = " + value)
 		switch key {
 		case "o":
 			// o has special handling to parse out UID, GID.
