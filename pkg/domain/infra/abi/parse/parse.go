@@ -27,6 +27,7 @@ func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) 
 			splitVal := strings.Split(value, ",")
 			finalVal := []string{}
 			for _, o := range splitVal {
+				fmt.Println("o = " + o)
 				// Options will be formatted as either "opt" or
 				// "opt=value"
 				splitO := strings.SplitN(o, "=", 2)
