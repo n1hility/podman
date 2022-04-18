@@ -94,9 +94,7 @@ func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) 
 			if err != nil {
 				return nil, err
 			}
-			if newpath != value {
-				value = "device=" + newpath
-			}
+			value = newpath
 			fallthrough
 		default:
 			volumeOptions[key] = value
