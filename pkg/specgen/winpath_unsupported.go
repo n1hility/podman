@@ -3,7 +3,7 @@
 
 package specgen
 
-func shouldResolveWinPaths() bool {
+func ShouldResolveWinPaths() bool {
 	return false
 }
 

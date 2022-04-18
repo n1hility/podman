@@ -157,7 +157,7 @@ func GenVolumeMounts(volumeFlag []string) (map[string]spec.Mount, map[string]*Na
 // when running as a WSL linux guest or Windows client
 func SplitVolumeString(vol string) []string {
 	parts := strings.Split(vol, ":")
-	if !shouldResolveWinPaths() {
+	if !ShouldResolveWinPaths() {
 		return parts
 	}
 

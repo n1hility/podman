@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-func shouldResolveUnixWinVariant(path string) bool {
+func ShouldResolveUnixWinVariant(path string) bool {
 	return true
 }
 

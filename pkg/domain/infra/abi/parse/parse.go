@@ -18,9 +18,9 @@ import (
 func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) {
 	libpodOptions := []libpod.VolumeCreateOption{}
 	volumeOptions := make(map[string]string)
-
 	bindMount := false
 	deviceKey := ""
+	
 	for key, value := range opts {
 		switch key {
 		case "o":
@@ -78,7 +78,6 @@ func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) 
 					// set option "GID": "$gid"
 					volumeOptions["GID"] = splitO[1]
 				case "bind":
-					fmt.Println("bind")
 					bindMount = true					
 					fallthrough
 				default:
@@ -89,7 +88,6 @@ func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) 
 				volumeOptions[key] = strings.Join(finalVal, ",")
 			}
 		case "device":
-			fmt.Println("device")
 			deviceKey = key
 			fallthrough
 		default:
@@ -98,15 +96,13 @@ func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) 
 	}
 
 	// Both bind and device were specified
-	if bindMount && len(deviceKey) > 0 { 
+	if specgen.ShouldResolveWinPaths() && bindMount && len(deviceKey) > 0 { 
 		device, exists := volumeOptions[deviceKey]
 		if exists {
-			fmt.Println("exists")
 			newpath, err := specgen.ConvertWinMountPath(device)
 			if err != nil {
 				return nil, err
 			}
-			fmt.Println(newpath)
 			volumeOptions[deviceKey] = newpath
 		}
 	}

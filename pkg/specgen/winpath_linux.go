@@ -4,7 +4,7 @@ import (
 	"os"
 )
 
-func shouldResolveWinPaths() bool {
+func ShouldResolveWinPaths() bool {
 	return containerConfig.Engine.MachineEnabled && containerConfig.Engine.MachineType == "wsl"
 }
 

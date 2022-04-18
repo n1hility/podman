@@ -9,7 +9,7 @@ import (
 )
 
 func isHostWinPath(path string) bool {
-	return shouldResolveWinPaths() && strings.HasPrefix(path, `\\`) || hasWinDriveScheme(path, 0) || winPathExists(path)
+	return ShouldResolveWinPaths() && strings.HasPrefix(path, `\\`) || hasWinDriveScheme(path, 0) || winPathExists(path)
 }
 
 func hasWinDriveScheme(path string, start int) bool {
@@ -23,7 +23,7 @@ func hasWinDriveScheme(path string, start int) bool {
 
 // Converts a Windows path to a WSL guest path if local env is a WSL linux guest or this is a Windows client.
 func ConvertWinMountPath(path string) (string, error) {
-	if !shouldResolveWinPaths() {
+	if !ShouldResolveWinPaths() {
 		return path, nil
 	}
 
