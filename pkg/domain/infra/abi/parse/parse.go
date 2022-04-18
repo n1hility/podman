@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -76,7 +77,9 @@ func VolumeOptions(opts map[string]string) ([]libpod.VolumeCreateOption, error) 
 					volumeOptions["GID"] = splitO[1]
 				case "device":
 					if len(splitO) == 2 {
+						fmt.Println("device detected")
 						newpath, err := specgen.ConvertWinMountPath(splitO[1])
+						fmt.Println("newpath =" + newpath)
 						if err != nil {
 							return nil, err
 						}
