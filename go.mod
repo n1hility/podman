@@ -76,3 +76,5 @@ require (
 )
 
 replace github.com/onsi/gomega => github.com/onsi/gomega v1.16.0
+
+replace github.com/containers/common => github.com/n1hility/common v0.47.5-0.20220422171618-b78c393280e0
