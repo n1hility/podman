@@ -2621,7 +2621,7 @@ func (c *Container) getHosts() string {
 	// Add gateway entry if we are not in a machine. If we use podman machine
 	// the gvproxy dns server will take care of host.containers.internal.
 	// https://github.com/containers/gvisor-tap-vsock/commit/1108ea45162281046d239047a6db9bc187e64b08
-	if !c.runtime.config.Engine.MachineEnabled {
+	if !util.IsPodmanMachine() {
 		var depCtr *Container
 		netStatus := c.getNetworkStatus()
 		if c.config.NetNsCtr != "" {

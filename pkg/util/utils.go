@@ -31,7 +31,15 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
-var containerConfig *config.Config
+type MachineMarker struct {
+	Enabled bool
+	Type    string
+}
+
+var (
+	containerConfig *config.Config
+	machineMarker   *MachineMarker
+)
 
 func init() {
 	var err error
@@ -40,6 +48,22 @@ func init() {
 		logrus.Error(err)
 		os.Exit(1)
 	}
+
+	machineMarker = loadMachineMarker()
+}
+
+func loadMachineMarker() *MachineMarker {
+	var kind string
+
+	// Support deprecated config value for compatibility
+	enabled := containerConfig.Engine.MachineEnabled
+
+	if content, err := os.ReadFile("/etc/containers/podman-machine"); err == nil {
+		enabled = true
+		kind = strings.TrimSpace(string(content))
+	}
+
+	return &MachineMarker{enabled, kind}
 }
 
 // Helper function to determine the username/password passed
@@ -748,4 +772,16 @@ func SizeOfPath(path string) (uint64, error) {
 		return err
 	})
 	return size, err
+}
+
+func IsPodmanMachine() bool {
+	return machineMarker.Enabled
+}
+
+func MachineHostType() string {
+	return machineMarker.Type
+}
+
+func GetMachineMarker() *MachineMarker {
+	return machineMarker
 }
