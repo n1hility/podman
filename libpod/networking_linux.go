@@ -63,16 +63,63 @@ const (
 // This is need because a HostIP of 127.0.0.1 would now allow the gvproxy forwarder to reach to open ports.
 // For machine the HostIP must only be used by gvproxy and never in the VM.
 func (c *Container) convertPortMappings() []types.PortMapping {
-	if !machine.IsGvProxyBased() || len(c.config.PortMappings) == 0 {
+	if len(c.config.PortMappings) == 0 {
 		return c.config.PortMappings
 	}
-	// if we run in a machine VM we have to ignore the host IP part
+
+	var convert func(types.PortMapping) []types.PortMapping
+	if machine.IsGvProxyBased() {
+		// if we run in a qemu VM we have to ignore the host IP part
+		convert = stripHost
+	} else if machine.MachineHostType() == machine.Wsl {
+		// WSL machines do not relay ipv4 traffic to dual-stack ports, simulate instead
+		convert = splitDualStack
+	} else {
+		return c.config.PortMappings
+	}
+
 	newPorts := make([]types.PortMapping, 0, len(c.config.PortMappings))
 	for _, port := range c.config.PortMappings {
-		port.HostIP = ""
-		newPorts = append(newPorts, port)
+		newPorts = append(newPorts, convert(port)...)
 	}
+
 	return newPorts
+}
+
+func stripHost(port types.PortMapping) []types.PortMapping {
+	port.HostIP = ""
+	return []types.PortMapping{port}
+}
+
+func splitDualStack(port types.PortMapping) []types.PortMapping {
+	ports := []types.PortMapping{port}
+	protocol := port.Protocol
+	if strings.HasSuffix(protocol, "4") || strings.HasSuffix(protocol, "6") {
+		return ports
+	}
+
+	host := port.HostIP
+	if len(host) == 0 {
+		host = "0.0.0.0"
+	}
+	ip := net.ParseIP(host)
+	splitLoopback := ip.IsLoopback() && ip.To4() == nil
+	// Map ::1 and 0.0.0.0/:: to ipv4 + ipv6 to simulate dual-stack
+	if ip.IsUnspecified() || splitLoopback {
+		ports = append(ports, port)
+		ports[0].Protocol = protocol + "4"
+		ports[1].Protocol = protocol + "6"
+		if splitLoopback {
+			// Hacky, but we will only have one ipv4 loopback with WSL config
+			ports[0].HostIP = "127.0.0.1"
+		}
+		if ip.IsUnspecified() {
+			ports[0].HostIP = "0.0.0.0"
+			ports[1].HostIP = "::"
+		}
+	}
+
+	return ports
 }
 
 func (c *Container) getNetworkOptions(networkOpts map[string]types.PerNetworkOptions) types.NetworkOptions {

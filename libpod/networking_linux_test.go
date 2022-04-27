@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/containers/common/libnetwork/types"
+	"github.com/containers/common/pkg/machine"
 	"github.com/containers/podman/v4/libpod/define"
 )
 
@@ -438,6 +439,103 @@ func Test_resultToBasicNetworkConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+type SpecData struct {
+	mach        string
+	sourceProto string
+	sourceIP    string
+	expectCount int
+	expectProto string
+	expectIP    string
+	secondProto string
+	secondIP    string
+}
+
+func TestMachinePortConversion(t *testing.T) {
+	//nolint
+	const (
+		IP4_ALL = "0.0.0.0"
+		IP4__LO = "127.0.0.1"
+		IP6_ALL = "::"
+		IP6__LO = "::1"
+		TCP_    = "tcp"
+		TCP4    = "tcp4"
+		TCP6    = "tcp6"
+		WSL     = "wsl"
+		QEMU    = "qemu"
+		___     = ""
+		IP6_REG = "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
+		IP4_REG = "10.0.0.1"
+	)
+
+	tests := []SpecData{
+		// Split cases
+		{WSL, TCP_, IP4_ALL, 2, TCP4, IP4_ALL, TCP6, IP6_ALL},
+		{WSL, TCP_, IP6_ALL, 2, TCP4, IP4_ALL, TCP6, IP6_ALL},
+		{WSL, TCP_, IP6__LO, 2, TCP4, IP4__LO, TCP6, IP6__LO},
+
+		// Non-Split
+		{WSL, TCP_, IP4__LO, 1, TCP_, IP4__LO, "", ""},
+		{WSL, TCP4, IP4_ALL, 1, TCP4, IP4_ALL, "", ""},
+		{WSL, TCP6, IP6__LO, 1, TCP6, IP6__LO, "", ""},
+		{WSL, TCP_, IP4_REG, 1, TCP_, IP4_REG, "", ""},
+		{WSL, TCP_, IP6_REG, 1, TCP_, IP6_REG, "", ""},
+		{___, TCP_, IP4_ALL, 1, TCP_, IP4_ALL, "", ""},
+		{___, TCP_, IP6_ALL, 1, TCP_, IP6_ALL, "", ""},
+		{___, TCP_, IP4__LO, 1, TCP_, IP4__LO, "", ""},
+		{___, TCP_, IP6__LO, 1, TCP_, IP6__LO, "", ""},
+
+		// Filter Host
+		{QEMU, TCP_, IP4_ALL, 1, TCP_, "", "", ""},
+		{QEMU, TCP_, IP6_ALL, 1, TCP_, "", "", ""},
+		{QEMU, TCP_, IP4__LO, 1, TCP_, "", "", ""},
+		{QEMU, TCP_, IP6__LO, 1, TCP_, "", "", ""},
+		{QEMU, TCP_, IP6_REG, 1, TCP_, "", "", ""},
+		{QEMU, TCP_, IP4_REG, 1, TCP_, "", "", ""},
+		{QEMU, TCP4, IP4_ALL, 1, TCP4, "", "", ""},
+		{QEMU, TCP6, IP6_ALL, 1, TCP6, "", "", ""},
+	}
+
+	for _, data := range tests {
+		verifySplit(t, data)
+	}
+}
+
+func verifySplit(t *testing.T, data SpecData) {
+	machine := machine.GetMachineMarker()
+	oldEnable, oldType := machine.Enabled, machine.Type
+	machine.Enabled, machine.Type = len(data.mach) > 0, data.mach
+
+	source := types.PortMapping{
+		Protocol:      data.sourceProto,
+		HostIP:        data.sourceIP,
+		HostPort:      100,
+		ContainerPort: 200,
+	}
+	expect, second := source, source
+	ctr := &Container{
+		config: &ContainerConfig{
+			ContainerNetworkConfig: ContainerNetworkConfig{
+				PortMappings: []types.PortMapping{source},
+			},
+		},
+	}
+	ports := ctr.convertPortMappings()
+
+	assert.Equal(t, data.expectCount, len(ports))
+
+	expect.Protocol = data.expectProto
+	expect.HostIP = data.expectIP
+	assert.Equal(t, expect, ports[0])
+
+	if data.expectCount > 1 {
+		second.Protocol = data.secondProto
+		second.HostIP = data.secondIP
+		assert.Equal(t, second, ports[1])
+	}
+
+	machine.Enabled, machine.Type = oldEnable, oldType
 }
 
 func benchmarkOCICNIPortsToNetTypesPorts(b *testing.B, ports []types.OCICNIPortMapping) {
