@@ -144,18 +144,56 @@ func (b *Builder) Run(command []string, options RunOptions) error {
 		g.SetProcessArgs(nil)
 	}
 
-	for _, d := range b.Devices {
-		sDev := spec.LinuxDevice{
-			Type:     string(d.Type),
-			Path:     d.Path,
-			Major:    d.Major,
-			Minor:    d.Minor,
-			FileMode: &d.FileMode,
-			UID:      &d.Uid,
-			GID:      &d.Gid,
+	// Mount devices if any and if session is rootless attempt a bind-mount
+	// just like podman.
+	if unshare.IsRootless() {
+		// We are going to create bind mounts for devices
+		// but we need to make sure that we don't override
+		// anything which is already in OCI spec.
+		mounts := make(map[string]interface{})
+		for _, m := range g.Mounts() {
+			mounts[m.Destination] = true
 		}
-		g.AddDevice(sDev)
-		g.AddLinuxResourcesDevice(true, string(d.Type), &d.Major, &d.Minor, string(d.Permissions))
+		newMounts := []spec.Mount{}
+		for _, d := range b.Devices {
+			// Default permission is read-only.
+			perm := "ro"
+			// Get permission configured for this device but only process `write`
+			// permission in rootless since `mknod` is not supported anyways.
+			if strings.Contains(string(d.Rule.Permissions), "w") {
+				perm = "rw"
+			}
+			devMnt := spec.Mount{
+				Destination: d.Destination,
+				Type:        parse.TypeBind,
+				Source:      d.Source,
+				Options:     []string{"slave", "nosuid", "noexec", perm, "rbind"},
+			}
+			// Podman parity: podman skips these two devices hence we do the same.
+			if d.Path == "/dev/ptmx" || strings.HasPrefix(d.Path, "/dev/tty") {
+				continue
+			}
+			// Device is already in OCI spec do not re-mount.
+			if _, found := mounts[d.Path]; found {
+				continue
+			}
+			newMounts = append(newMounts, devMnt)
+		}
+		g.Config.Mounts = append(newMounts, g.Config.Mounts...)
+	} else {
+		for _, d := range b.Devices {
+			sDev := spec.LinuxDevice{
+				Type:     string(d.Type),
+				Path:     d.Path,
+				Major:    d.Major,
+				Minor:    d.Minor,
+				FileMode: &d.FileMode,
+				UID:      &d.Uid,
+				GID:      &d.Gid,
+			}
+			g.AddDevice(sDev)
+			g.AddLinuxResourcesDevice(true, string(d.Type), &d.Major, &d.Minor, string(d.Permissions))
+		}
 	}
 
 	setupMaskedPaths(g)
@@ -2443,7 +2481,7 @@ func DefaultNamespaceOptions() (define.NamespaceOptions, error) {
 		{Name: string(specs.MountNamespace), Host: false},
 		{Name: string(specs.NetworkNamespace), Host: cfg.NetNS() == "host"},
 		{Name: string(specs.PIDNamespace), Host: cfg.PidNS() == "host"},
-		{Name: string(specs.UserNamespace), Host: cfg.Containers.UserNS == "host"},
+		{Name: string(specs.UserNamespace), Host: cfg.Containers.UserNS == "" || cfg.Containers.UserNS == "host"},
 		{Name: string(specs.UTSNamespace), Host: cfg.UTSNS() == "host"},
 	}
 	return options, nil
@@ -2688,10 +2726,6 @@ func getSecretMount(tokens []string, secrets map[string]define.Secret, mountlabe
 			return nil, "", err
 		}
 		ctrFileOnHost = filepath.Join(containerWorkingDir, "secrets", id)
-		_, err = os.Stat(ctrFileOnHost)
-		if !os.IsNotExist(err) {
-			return nil, "", err
-		}
 	default:
 		return nil, "", errors.New("invalid source secret type")
 	}
@@ -2860,7 +2894,7 @@ func (b *Builder) cleanupRunMounts(context *imagetypes.SystemContext, mountpoint
 				// if image is being used by something else
 				_ = i.Unmount(false)
 			}
-			if errors.Cause(err) == storagetypes.ErrImageUnknown {
+			if errors.Is(errors.Cause(err), storagetypes.ErrImageUnknown) {
 				// Ignore only if ErrImageUnknown
 				// Reason: Image is already unmounted do nothing
 				continue
