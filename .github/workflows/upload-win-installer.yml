@@ -1,0 +1,73 @@
+name: Upload Windows Installer
+
+on:
+  release:
+    types: [created, published, edited, prereleased, released]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+        FETCH_BASE_URL: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+    - uses: actions/checkout@v3
+    - name: Check
+      id: check
+      run: |
+        Push-Location contrib\win-installer
+        .\check.ps1 ${{github.event.release.tag_name}}
+        $code = $LASTEXITCODE
+        if ($code -eq 2) {
+          Write-Output "::set-output name=already-exists::true"
+          Pop-Location
+          Exit 0
+        } 
+        Write-Output "UPLOAD_ASSET_NAME=$env:UPLOAD_ASSET_NAME" | Out-File -FilePath $env:GITHUB_ENV -Append
+        Pop-Location
+        Exit $code
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      if: steps.Check.outputs.already-exists != 'true'
+      with:
+        go-version: 1.18
+    - name: Setup Signature Tooling
+      if: steps.Check.outputs.already-exists != 'true'
+      run: |
+          dotnet tool install --global AzureSignTool --version 3.0.0
+          echo "CERT_NAME=${{secrets.AZ_CERT_NAME}}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "VAULT_ID=${{secrets.AZ_VAULT_ID}}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "APP_ID=${{secrets.AZ_APP_ID}}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "TENANT_ID=${{secrets.AZ_TENANT_ID}}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "CLIENT_SECRET=${{secrets.AZ_CLIENT_SECRET}}" | Out-File -FilePath $env:GITHUB_ENV -Append
+    - name: Build
+      id: build
+      if: steps.check.outputs.already-exists != 'true'
+      run: |
+        Push-Location contrib\win-installer
+        .\build.ps1 ${{github.event.release.tag_name}} prod
+        $code = $LASTEXITCODE
+        if ($code -eq 2) {
+          Write-Output "::set-output name=artifact-missing::true"
+          Pop-Location
+          Exit 0
+        }
+        Pop-Location
+        Exit $code
+    - name: Upload
+      if: steps.check.outputs.already-exists != 'true' && steps.build.outputs.artifact-missing != 'true'
+      env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        Push-Location contrib\win-installer
+        gh release upload ${{github.event.release.tag_name}} $ENV:UPLOAD_ASSET_NAME
+        if ($LASTEXITCODE -ne 0) {
+          .\check.ps1 ${{github.event.release.tag_name}}
+          if ($LASTEXITCODE -eq 2) {
+            Write-Host "Another job uploaded before us, skipping"
+            Pop-Location
+            Exit 0
+          }
+          Pop-Location
+          Exit 1
+        }
+        Pop-Location
