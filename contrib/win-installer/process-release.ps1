@@ -23,7 +23,7 @@ function DownloadOrSkip {
         Invoke-WebRequest -UseBasicParsing -ErrorAction Stop -Uri $url -OutFile $file
     } Catch {
         if ($_.Exception.Response.StatusCode -eq 404) {
-            Write-Host "URL not availahble, signaling skip:"
+            Write-Host "URL not available, signaling skip:"
             Write-Host "URL: $url"
             Exit 2
         }
