@@ -3,19 +3,35 @@ name: Upload Windows Installer
 on:
   release:
     types: [created, published, edited]
-
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version to build and upload (e.g. "4.2.1")'
+        required: true
 jobs:
   build:
     runs-on: windows-latest
     env:
         FETCH_BASE_URL: ${{ github.server_url }}/${{ github.repository }}
     steps:
+    - name: Determine version
+      id: getversion
+      run: |
+        $version = "${{ inputs.version }}""
+        if ($version.Length -lt 1) {
+          $version = "${{ github.event.release.tag_name }}"
+          if ($version.Length -lt 1) {
+            Write-Host "Could not determine version!"
+            Exit 1
+          }
+        }
+        Write-Output "::set-output name=version::${{ inputs.version }}"
     - uses: actions/checkout@v3
     - name: Check
       id: check
       run: |
         Push-Location contrib\win-installer
-        .\check.ps1 ${{github.event.release.tag_name}}
+        .\check.ps1 ${{steps.getversion.outputs.version}}
         $code = $LASTEXITCODE
         if ($code -eq 2) {
           Write-Output "::set-output name=already-exists::true"
@@ -27,7 +43,7 @@ jobs:
         Exit $code
     - name: Set up Go
       uses: actions/setup-go@v3
-      if: steps.Check.outputs.already-exists != 'true'
+      if: steps.check.outputs.already-exists != 'true'
       with:
         go-version: 1.18
     - name: Setup Signature Tooling
@@ -44,7 +60,7 @@ jobs:
       if: steps.check.outputs.already-exists != 'true'
       run: |
         Push-Location contrib\win-installer
-        .\build.ps1 ${{github.event.release.tag_name}} prod
+        .\build.ps1 ${{steps.getversion.outputs.version}} prod
         $code = $LASTEXITCODE
         if ($code -eq 2) {
           Write-Output "::set-output name=artifact-missing::true"
@@ -59,9 +75,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         Push-Location contrib\win-installer
-        gh release upload ${{github.event.release.tag_name}} $ENV:UPLOAD_ASSET_NAME
+        gh release upload ${{steps.getversion.outputs.version}} $ENV:UPLOAD_ASSET_NAME
         if ($LASTEXITCODE -ne 0) {
-          .\check.ps1 ${{github.event.release.tag_name}}
+          .\check.ps1 ${{steps.getversion.outputs.version}}
           if ($LASTEXITCODE -eq 2) {
             Write-Host "Another job uploaded before us, skipping"
             Pop-Location
