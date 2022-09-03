@@ -9,13 +9,20 @@
 5. AzureSignTool (optional)
 6. WiX Toolset
 
-## One off build (-dev output, unsigned)
+## Usage
 
 ```
-.\build.ps1 <version>
+.\build.ps1 <version> [prod|dev] [release_dir]
 ```
 
-For example:
+## One off build (-dev output (default), unsigned (default))
+
 ```
 .\build.ps1 4.2.0
+```
+
+## Build with a pre-downloaded win release zip in my-download dir
+
+```
+.\build.ps1 4.2.0 dev my-download
 ```

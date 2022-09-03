@@ -50,9 +50,16 @@ function DownloadOptional {
 
 
 if ($args.Count -lt 1) {
-    Write-Host "Usage: " $MyInvocation.MyCommand.Name "<version>"
+    Write-Host "Usage: " $MyInvocation.MyCommand.Name "<version> [release_dir]"
     Exit 1
 }
+
+$releaseDir = ""
+if ($args.Count -gt 1 -and $args[1].Length -gt 0) {
+    $path = $args[1]
+    $releaseDir = (Resolve-Path -Path "$path" -ErrorAction Stop).Path
+}
+
 
 $base_url = "$ENV:FETCH_BASE_URL"
 if ($base_url.Length -le 0) {
@@ -89,11 +96,19 @@ try {
     Push-Location fetch -ErrorAction Stop
     $restore = 1
     $ProgressPreference = 'SilentlyContinue';
-    DownloadOrSkip "$base_url/releases/download/$version/podman-remote-release-windows_amd64.zip"  "release.zip"
-    DownloadOptional "$base_url/releases/download/$version/shasums" ..\shasums
+
+    if ($releaseDir.Length -gt 0) {
+        Copy-Item -Path "$releaseDir/podman-remote-release-windows_amd64.zip" "release.zip"
+    } else {
+        DownloadOrSkip "$base_url/releases/download/$version/podman-remote-release-windows_amd64.zip"  "release.zip"
+        DownloadOptional "$base_url/releases/download/$version/shasums" ..\shasums
+    }
     Expand-Archive -Path release.zip
     $loc = Get-ChildItem -Recurse -Path . -Name win-sshproxy.exe
     if (!$loc) {
+        if ($releaseDir.Length -gt 0) {
+            throw "Release dir only supports zip which includes win-sshproxy.exe"
+        }
         Write-Host "Old release, zip does not include win-sshproxy.exe, fetching via msi"
         DownloadOrSkip "$base_url/releases/download/$version/podman-$version.msi" "podman.msi"
         dark -x expand ./podman.msi

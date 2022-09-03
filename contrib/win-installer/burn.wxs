@@ -17,15 +17,16 @@
     </BootstrapperApplicationRef>
     <Variable Name='InstallFolder' Type='string' Value='[ProgramFiles64Folder]RedHat\Podman'/>
     <Variable Name="VERSION" Value="$(var.VERSION)"/>
-    <Variable Name="WSLCheckbox" Type="numeric" Value="1"/>
+    <Variable Name="WSLCheckbox" Type="numeric" Value="1" bal:Overridable="yes"/>
+    <Variable Name="AllowOldWin" Type="numeric" Value="0" bal:Overridable="yes"/>
     <Variable Name="LaunchTarget" Value="explorer.exe"/>
     <Variable Name="LaunchArguments" Value="&quot;[InstallFolder]\podman-for-windows.html&quot;"/>
 
     <util:RegistrySearch Id="PreviousVersionSearch" Variable="PreviousVersion"  Result="value" Root="HKLM"  Key="SOFTWARE\[WixBundleManufacturer]\Updates\[WixBundleName]" Value="PackageVersion"/>
     <util:RegistrySearch Id="PreviousInstallFolderSearch" Root="HKLM" Key="SOFTWARE\[WixBundleManufacturer]\[WixBundleName]" Value="InstallDir" Variable="PreviousInstallFolder"/>
     <util:RegistrySearch Id="CurrentBuild" Variable="CBNumber" Result="value" Root="HKLM" Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion" Value="CurrentBuildNumber"/>
-    <bal:Condition Message="Windows 10 Anniversary Update (19041) or later is required to run this application.">
-      <![CDATA[VersionNT >= v10.0 AND CBNumber >= 19041]]>
+    <bal:Condition Message="Windows 10 (19041) or later is required to run this application.">
+      <![CDATA[VersionNT >= v10.0 AND (CBNumber >= 19041 OR AllowOldWin = 1)]]>
     </bal:Condition>
     <bal:Condition Message="You have an installed development, pre-release version, or alternative build identifying as the same version of this installer. You must uninstall the existing version of Podman first, before proceeding.">
        <![CDATA[WixBundleAction <> 5 OR WixBundleInstalled OR WixBundleForcedRestartPackage OR PreviousVersion <> VERSION]]>
@@ -35,7 +36,7 @@
         <MsiProperty Name="INSTALLDIR" Value="[InstallFolder]" />
         <MsiProperty Name="WITH_WSL" Value="[WSLCheckbox]"/>
       </MsiPackage>
-      <ExePackage DisplayName="WSL Kernel Install" InstallCondition="WSLCheckbox" SourceFile="artifacts\podman-wslkerninst.exe"/>
+      <ExePackage DisplayName="WSL Kernel Install" InstallCondition="WSLCheckbox = 1" SourceFile="artifacts\podman-wslkerninst.exe"/>
     </Chain>
     <OptionalUpdateRegistration/>
   </Bundle>
