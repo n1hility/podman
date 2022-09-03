@@ -280,7 +280,7 @@ spelled with complete minutiae.
       event states triggered, but this can be ignored, as any duplicates
       will gracefully back-off. The job takes 5-6 minutes to complete.
    1. Confirm the podman-[version]-setup.exe file is now on the release
-      page. This might not be tbe case if you accidentally published the
+      page. This might not be the case if you accidentally published the
       release before uploading the binaries, as the job may look before
       they are available. If that happens, you can either manually kick
       off the job (see below), or just make a harmless edit to the
@@ -292,7 +292,7 @@ spelled with complete minutiae.
 
 
       ### *CLI Approach*
-      1. Install the Github CLI (e.g. sudo dnf install gh)
+      1. Install the GitHub CLI (e.g. `sudo dnf install gh`)
       1. Run (replacing below version number to release version)
          ```
          gh workflow run "Upload Windows Installer" -F version="4.2.0"
