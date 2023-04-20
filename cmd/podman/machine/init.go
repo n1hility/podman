@@ -29,6 +29,7 @@ var (
 	initOpts           = machine.InitOptions{}
 	defaultMachineName = machine.DefaultMachineName
 	now                bool
+	defaultProvider    = GetSystemDefaultProvider()
 )
 
 // maxMachineNameSize is set to thirty to limit huge machine names primarily
@@ -110,6 +111,10 @@ func init() {
 
 	rootfulFlagName := "rootful"
 	flags.BoolVar(&initOpts.Rootful, rootfulFlagName, false, "Whether this machine should prefer rootful container execution")
+
+	userModeNetFlagName := "user-mode-networking"
+	flags.BoolVar(&initOpts.UserModeNetworking, userModeNetFlagName, defaultProvider.Defaults().UserModeNetworking,
+		"Whether this machine should use user-mode networking, routing traffic through a host user-space process")
 }
 
 func initMachine(cmd *cobra.Command, args []string) error {
@@ -118,7 +123,7 @@ func initMachine(cmd *cobra.Command, args []string) error {
 		vm  machine.VM
 	)
 
-	provider := GetSystemDefaultProvider()
+	provider := defaultProvider
 	initOpts.Name = defaultMachineName
 	if len(args) > 0 {
 		if len(args[0]) > maxMachineNameSize {

@@ -74,6 +74,12 @@ type HyperVMachine struct {
 	LastUp time.Time
 }
 
+func (p *Virtualization) Defaults() machine.ProviderDefaults {
+	return machine.ProviderDefaults{
+		UserModeNetworking: true,
+	}
+}
+
 func (m *HyperVMachine) Init(opts machine.InitOptions) (bool, error) {
 	var (
 		key string
