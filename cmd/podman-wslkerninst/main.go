@@ -4,16 +4,20 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
 
-	"github.com/containers/podman/v4/pkg/machine/wsl"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/windows/svc/eventlog"
+	"golang.org/x/text/encoding/unicode"
+	"golang.org/x/text/transform"
 )
 
 const (
@@ -49,7 +53,7 @@ func installWslKernel() error {
 	)
 	backoff := 500 * time.Millisecond
 	for i := 1; i < 6; i++ {
-		err = wsl.SilentExec("wsl", "--update")
+		err = SilentExec("wsl", "--update")
 		if err == nil {
 			break
 		}
@@ -87,7 +91,7 @@ func warn(title string, caption string) int {
 func main() {
 	args := os.Args
 	setupLogging(path.Base(args[0]))
-	if wsl.IsWSLInstalled() {
+	if IsWSLInstalled() {
 		// nothing to do
 		logrus.Info("WSL Kernel already installed")
 		return
@@ -100,4 +104,45 @@ func main() {
 	}
 
 	logrus.Info("WSL Kernel update successful")
+}
+
+func SilentExec(command string, args ...string) error {
+	cmd := exec.Command(command, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	return cmd.Run()
+}
+
+func IsWSLInstalled() bool {
+	cmd := SilentExecCmd("wsl", "--status")
+	out, err := cmd.StdoutPipe()
+	cmd.Stderr = nil
+	if err != nil {
+		return false
+	}
+	if err = cmd.Start(); err != nil {
+		return false
+	}
+	scanner := bufio.NewScanner(transform.NewReader(out, unicode.UTF16(unicode.LittleEndian, unicode.UseBOM).NewDecoder()))
+	result := true
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Windows 11 does not set an error exit code when a kernel is not avail
+		if strings.Contains(line, "kernel file is not found") {
+			result = false
+			break
+		}
+	}
+	if err := cmd.Wait(); !result || err != nil {
+		return false
+	}
+
+	return true
+}
+
+func SilentExecCmd(command string, args ...string) *exec.Cmd {
+	cmd := exec.Command(command, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	return cmd
 }
